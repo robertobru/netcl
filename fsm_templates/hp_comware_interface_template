@@ -1,0 +1,9 @@
+Value PortName ([GE,FGE,XGE]\S+)
+Value LinkUp (\w+)
+Value LinkSpeed (\S+)
+Value LinkDuplex (\S+)
+
+Start
+ ^${PortName}\s+${LinkUp}\s+${LinkSpeed}\s+${LinkDuplex}.* -> Record
+
+

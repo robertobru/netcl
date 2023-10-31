@@ -1,0 +1,43 @@
+Value PortName (\S+)
+Value LinkMode (\w+)
+Value AccessVlan (\d+)
+Value TrunkVlans (.*)
+Value VrfPort (\S+)
+Value IP_ADDR (\S+)
+Value IP_MASK (\S+)
+Value Description (.*)
+Value Vrf (\S+)
+Value VrfRD (\S+)
+Value VrfDescription (.*)
+Value List VrfExport ([\d,:,\s]+)
+Value List VrfImport ([\d,:,\s]+)
+Value Vlan (.*)
+
+
+Start
+ ^interface\s+${PortName} -> InterfaceState
+ ^ip vpn-instance\s+${Vrf} -> VrfState
+ ^vlan ${Vlan} -> Record
+
+InterfaceState
+ ^\s+port link-type ${LinkMode} -> Continue
+ ^\s+port access vlan ${AccessVlan} -> Continue
+ ^\s+port trunk permit vlan ${TrunkVlans} -> Continue
+ ^\s+ip binding vpn-instance ${VrfPort}
+ ^\s+ip address ${IP_ADDR} ${IP_MASK}
+ ^\s+description ${Description}
+ ^# -> Record Start
+
+VrfState
+ ^\sroute-distinguisher ${VrfRD}
+ ^\sdescription ${VrfDescription}
+ ^\svpn-target ${VrfImport} import-extcommunity -> Continue
+ ^\svpn-target ${VrfExport} export-extcommunity -> Continue
+ ^# -> Record Start
+
+
+
+
+
+
+

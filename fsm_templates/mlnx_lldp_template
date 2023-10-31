@@ -1,0 +1,9 @@
+Value LocalPort (Eth\S+)
+Value DeviceId (\S+)
+Value RemotePort (\S+)
+Value RemoteSystemName (\S+)
+
+Start
+ ^${LocalPort}\s+${DeviceId}\s+${RemotePort}\s+${RemoteSystemName} -> Record
+
+
