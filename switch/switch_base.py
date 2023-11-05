@@ -1,5 +1,7 @@
+from __future__ import annotations  # needed to annotate class methods returning instances
 from netdevice import Device, PhyPort, VlanL3Port, Vrf, ConfigItem, LldpNeighbor
 import abc
+import json
 from typing import List, Literal, Union
 import traceback
 from importlib import import_module
@@ -41,7 +43,7 @@ class Switch(Device):
         pass
 
     @classmethod
-    def create(cls, input_data: Device):
+    def create(cls, input_data: Device) -> Switch:
         # Fixme: check db to assure there are no other switches with the same name/address
         if input_data.model not in os_models:
             raise ValueError("Switch OS model not supported")
@@ -62,7 +64,7 @@ class Switch(Device):
         return switch
 
     @classmethod
-    def from_db(cls, device_name: str):
+    def from_db(cls, device_name: str) -> Switch:
         db_data = _db.findone_DB("switches", {'name': device_name})
         if not db_data:
             raise ValueError('switch {}'.format(device_name))
@@ -72,17 +74,17 @@ class Switch(Device):
         switch_os = os_models[db_data['model']]
         try:
             return getattr(import_module(
-                    "switch.{}".format(os_models[switch_os]['module'])
-                ), os_models[switch_os]['class'])(**db_data)
+                    "switch.{}".format(switch_os['module'])
+                ), switch_os['class'])(**db_data)
         except Exception:
             logger.error(traceback.format_exc())
             raise ValueError('re-initialization for switch {} failed'.format(device_name))
 
-    def to_db(self):
-        if self.db.exists_DB("switches", {'name': self.name}):
-            self.db.update_DB("switches", self.to_switch_model().model_dump_json(), {'name': self.name})
+    def to_db(self) -> None:
+        if _db.exists_DB("switches", {'name': self.name}):
+            _db.update_DB("switches", json.loads(self.to_switch_model().model_dump_json()), {'name': self.name})
         else:
-            self.db.insert_DB("switches", self.to_switch_model().model_dump_json())
+            _db.insert_DB("switches", json.loads(self.to_switch_model().model_dump_json()))
 
     def to_switch_model(self):
         return Switch.model_validate(self, from_attributes=True)

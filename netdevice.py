@@ -10,9 +10,9 @@ class Device(BaseModel):
     passwd: Optional[SecretStr]
     address: str
 
-    """@field_serializer('password', when_used='json')
+    @field_serializer('passwd', when_used='json')
     def dump_secret(self, v):
-        return v.get_secret_value()"""
+        return v.get_secret_value()
 
 
 class ConfigItem(BaseModel):

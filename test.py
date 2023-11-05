@@ -3,7 +3,7 @@ from netdevice import Device
 
 device_data = Device.model_validate(
     {
-        "name": "test",
+        "name": "hp5920",
         "model": "hp_comware",
         "user": "admin",
         "passwd": "pap3rin0",
@@ -11,6 +11,10 @@ device_data = Device.model_validate(
     }
 )
 switch = Switch.create(device_data)
+switch.to_db()
+
+switch2 = Switch.from_db("hp5920")
+print(switch2.model_dump())
 
 # switch.add_vlan(13)
 # switch.retrieve_info()

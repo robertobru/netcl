@@ -1,5 +1,6 @@
 from typing import List, Union, Any
 import netmiko
+from tenacity import retry, stop_after_attempt
 from utils import create_logger
 from netdevice import Device
 from switch.switch_base import SwitchNotConnectedException, SwitchNotAuthenticatedException, \
@@ -16,6 +17,7 @@ class NetmikoSbi:
         self.device = device
         self.create_session()
 
+    @retry(stop=stop_after_attempt(3))
     def create_session(self):
         try:
             self._netmiko_session = netmiko.ConnectHandler(
@@ -35,7 +37,7 @@ class NetmikoSbi:
             logger.error('ReadTimeout in authentication')
             raise SwitchNotConnectedException()
 
-    # @check_session
+    @retry(stop=stop_after_attempt(3))
     def send_command(self, commands: List[str], enable=True) -> List:
         logger.debug("send command: {}".format(commands))
         try:
@@ -52,7 +54,7 @@ class NetmikoSbi:
         except netmiko.exceptions.AuthenticationException:
             raise SwitchNotAuthenticatedException()
 
-    # @check_session
+    @retry(stop=stop_after_attempt(3))
     def get_info(self, command: str, use_textfsm: bool = True, enable=False) -> Union[dict[str, Any], str, list]:
         logger.debug("getting info command: {}".format(command))
         try:

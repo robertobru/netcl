@@ -5,7 +5,7 @@ import textfsm
 from pydantic import IPvAnyInterface
 from netaddr import IPAddress
 from utils import create_logger
-from typing import List
+from typing import List, Literal
 
 
 logger = create_logger('hp_comware')
@@ -56,7 +56,7 @@ class HpComware(Switch):
         for r in res:
             interface = self._get_port_by_shortname(r[0])
             interface.status = r[1] if r[1] != 'ADM' else 'DOWN'
-            interface.admin_status = 'UP' if r[1] != 'ADM' else 'DOWN'
+            interface.admin_status = 'ENABLED' if r[1] != 'ADM' else 'DISABLED'
             if interface.status == 'DOWN':
                 interface.speed = 0
             else:
@@ -165,9 +165,9 @@ class HpComware(Switch):
                 vrf_obj.ports.append(vlan_interface)
 
     def retrieve_neighbors(self):
-        _neighbors = self._sbi_driver.get_info("display lldp neighbor-information list")
-        if type(_neighbors) != List:
-            raise ValueError('_neighbors is not a list!!!')
+        _neighbors = self._sbi_driver.get_info("display lldp neighbor-information list", use_textfsm=True)
+        logger.debug('neighbours: {}, Type {}'.format(_neighbors, type(_neighbors)))
+
         for n in _neighbors:
             interface = self._get_port_by_shortname(n['local_interface'])
             interface.neighbor = LldpNeighbor(neighbor=n['neighbor'], remote_interface=n['neighbor_interface'])
@@ -179,6 +179,12 @@ class HpComware(Switch):
         pass
 
     def _add_vlan_to_port(self, vlan_id: int, port: PhyPort, pvid: bool = False) -> bool:
+        pass
+
+    def _del_vlan_to_port(self, vlan_ids: List[int], port: PhyPort) -> bool:
+        pass
+
+    def _set_port_mode(self, port: PhyPort, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']) -> bool:
         pass
 
     def _bind_vrf(self, vrf1: Vrf, vrf2: Vrf) -> bool:
