@@ -43,9 +43,10 @@ device_data = Device.model_validate(
         "model": "mellanox",
         "user": "admin",
         "passwd": "admin",
-        "address": "r1-mellanox1.maas"
+        "address": "r2mellanox-1.maas"
     }
 )
 switch = Switch.create(device_data)
+switch.add_vlan([2,3])
 
 # switch.retrieve_info()

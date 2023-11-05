@@ -142,7 +142,17 @@ class Switch(Device):
     def get_vlans(self) -> List[int]:
         return self.vlans
 
-    def add_vlan_to_port(self, vlan_id: int, port_name: str, port_mode: Literal['ACCESS', 'TRUNK'] = 'TRUNK',
+    def set_port_mode(self, port_name: str, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']):
+        port = self.get_port_by_name(port_name)
+        if port_mode == port.mode:
+            logger.warning("Port {} is already in {} mode".format(port_mode))
+        return self._set_port_mode()
+
+    @abc.abstractmethod
+    def _set_port_mode(self, port: PhyPort, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']) -> bool:
+        pass
+
+    def add_vlan_to_port(self, vlan_id: int, port_name: str, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK'] = 'TRUNK',
                          pvid: bool = False) -> bool:
         port = self.get_port_by_name(port_name)
         if not port:
@@ -157,6 +167,23 @@ class Switch(Device):
 
     @abc.abstractmethod
     def _add_vlan_to_port(self, vlan_id: int, port: PhyPort, pvid: bool = False) -> bool:
+        pass
+
+    def del_vlan_to_port(self, vlan_ids: List[int], port_name: str, port_mode: Literal['ACCESS', 'TRUNK'] = 'TRUNK') -> bool:
+        port = self.get_port_by_name(port_name)
+        if not port:
+            return False
+        if port.mode != port_mode:
+            logger.error("Port {} is not in mode {}. aborting!".format(port_name, port_mode))
+            return False
+        for vid in vlan_ids:
+            if vid not in self.vlans:
+                logger.warn("vlan {} not found, deletion aborted")
+                return False
+        return self._del_vlan_to_port(vlan_ids, port)
+
+    @abc.abstractmethod
+    def _del_vlan_to_port(self, vlan_ids: List[int], port: PhyPort) -> bool:
         pass
 
     def get_vrf_by_rd(self, rd: str) -> Vrf:

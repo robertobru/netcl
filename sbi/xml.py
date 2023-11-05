@@ -2,17 +2,19 @@ from typing import Literal, Union, List, Optional
 import requests
 import xmltodict
 from pydantic import BaseModel, Field
+from tenacity import retry, stop_after_attempt
 from netdevice import Device
 from utils import create_logger
+# from requests.packages.urllib3.exceptions import InsecureRequestWarning
 from switch.switch_base import SwitchNotConnectedException, SwitchNotAuthenticatedException, \
     SwitchConfigurationException
 
 logger = create_logger('xml_driver')
 XmlNodeRequestType = Literal['get', 'action', 'set-create', 'set-delete', 'set-modify']
-
+requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
 class MlnxOsXgRequestNode(BaseModel):
-    name: Literal['get', 'set-create', 'set-delete', 'set-modify']
+    name: Literal['get', 'action', 'set-create', 'set-delete', 'set-modify']
     type: str = 'string'
     value: str
 
@@ -101,13 +103,15 @@ class XmlRestSbi:
         self._rest_session = requests.Session()
         self.authenticate()
 
+    @retry(stop=stop_after_attempt(3))
     def authenticate(self):
         data = {'f_user_id': self.device.user, 'f_password': self.device.passwd.get_secret_value()}
         try:
             self._rest_session.get(
                 'https://{}/admin/launch?script=rh&template=login&action=login'.format(self.device.address),
                 data=data,
-                verify=False
+                verify=False,
+                timeout=(30, 60)
             )
         except requests.exceptions.ConnectionError:
             raise SwitchNotConnectedException
@@ -122,24 +126,25 @@ class XmlRestSbi:
             )
         )
 
-    # @check_session
+    @retry(stop=stop_after_attempt(3))
     def post(self, msg: MlnxOsXgRequest) -> XgResponse:
         xmlstr = xmltodict.unparse(msg.dump())
-        print(xmlstr)
+        # print(xmlstr)
         headers = {'Content-Type': 'text/xml'}
         try:
             output = self._rest_session.post(
                 'https://{}/xtree'.format(self.device.address),
                 data=xmlstr,
                 verify=False,
-                headers=headers
+                headers=headers,
+                timeout=(30, 60)
             )
         except requests.exceptions.ConnectionError:
             raise SwitchNotConnectedException()
         logger.debug('REST status {}\n{}'.format(output.status_code, output.text))
         if output.status_code != 200:
             raise SwitchNotAuthenticatedException()
-        print(output.text)
+        # print(output.text)
         res = XgResponse.parse(output.text)
         if res.xgStatus and (res.xgStatus.statusCode != 0 or res.xgStatus.statusMsg):
             if res.xgStatus.statusMsg == 'Not Authenticated':
@@ -150,6 +155,7 @@ class XmlRestSbi:
 
         return res
 
+    @retry(stop=stop_after_attempt(3))
     def multi_post(self, msg: List[MlnxOsXgRequestNode]) -> List[MlnxOsXgResponseNode]:
         xmlstr = xmltodict.unparse(MlnxOsXgRequest.create_multinode_node_request(msg).dump())
         headers = {'Content-Type': 'text/xml'}
@@ -158,7 +164,8 @@ class XmlRestSbi:
                 'https://{}/xtree'.format(self.device.address),
                 data=xmlstr,
                 verify=False,
-                headers=headers
+                headers=headers,
+                timeout=(45, 120)
             )
         except requests.exceptions.ConnectionError:
             raise SwitchNotConnectedException()

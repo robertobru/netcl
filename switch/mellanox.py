@@ -5,7 +5,7 @@ from pydantic import IPvAnyInterface
 from netaddr import IPAddress
 from utils import create_logger
 from sbi.netmiko import NetmikoSbi
-from typing import List
+from typing import List, Literal
 import textfsm
 
 logger = create_logger('mlnx_os')
@@ -177,12 +177,68 @@ class Mellanox(Switch):
             logger.error('problems in deleting vlan')
             return False
 
-    def _add_vlan_to_port(self, vlan_id: int, port: PhyPort, pvid: bool = False) -> bool:
-        if pvid:
-            print('pvid')
+    def _add_vlan_to_port(self, vlan_id: int, port: PhyPort, access_vlan: bool = False) -> bool:
+        if access_vlan:
+            if port.mode == 'TRUNK':
+                raise ValueError('Pvid cannot be configured in TRUNK mode, \
+                    please consider to switch the mode to HYBRID')
+            node_template = '/mlnxos/v1/vsr/vsr-default/interfaces/' + port.index + '/vlans/pvid={}'
+            port_vlan_requests = create_multinode_request(node_template, [vlan_id], request_type='action')
+            logger.info('port_vlan_requests {}'.format(port_vlan_requests))
+            try:
+                port_vlan_replies = self._sbi_xml_driver.multi_post(port_vlan_requests)
+                logger.info('port_vlan_replies {}'.format(port_vlan_replies))
+                port.access_vlan = vlan_id
+                return True
+            except Exception:
+                logger.error('problems in adding access vlan on Port {}'.format(port.name))
+                return False
         else:
-            print('not pvid')
-        return True
+            if port.mode == 'ACCESS':
+                raise ValueError('Tagged Vlans cannot be configured in ACCESS mode, \
+                                    please consider to switch the mode to TRUNK/HYBRID')
+            node_template = '/mlnxos/v1/vsr/vsr-default/interfaces/' + port.index + '/vlans/allowed/add|vlan_ids={}'
+            port_vlan_requests = create_multinode_request(node_template, [vlan_id], request_type='action')
+            logger.info('port_vlan_requests {}'.format(port_vlan_requests))
+            try:
+                port_vlan_replies = self._sbi_xml_driver.multi_post(port_vlan_requests)
+                logger.info('port_vlan_replies {}'.format(port_vlan_replies))
+                port.trunk_vlans.append(vlan_id)
+                return True
+            except Exception:
+                logger.error('problems in adding tagged vlan on Port {}'.format(port.name))
+                return False
+
+    def _del_vlan_to_port(self, vlan_ids: List[int], port: PhyPort) -> bool:
+        if port.mode == 'ACCESS':
+            raise ValueError('Tagged Vlans cannot be configured in ACCESS mode, \
+                                please consider to switch the mode to TRUNK/HYBRID')
+        node_template = '/mlnxos/v1/vsr/vsr-default/interfaces/{}/vlans/allowed/delete'
+        for vid in vlan_ids:
+            node_template = node_template + "|vlan_ids={}".format(vid)
+        port_vlan_requests = create_multinode_request(node_template, [port.index], request_type='action')
+        logger.info('port_vlan_requests {}'.format(port_vlan_requests))
+        try:
+            port_vlan_replies = self._sbi_xml_driver.multi_post(port_vlan_requests)
+            logger.info('port_vlan_replies {}'.format(port_vlan_replies))
+            port.trunk_vlans = list(set(port.trunk_vlans) - set(vlan_ids))
+            return True
+        except Exception:
+            logger.error('problems in adding tagged vlan on Port {}'.format(port.name))
+            return False
+
+    def _set_port_mode(self, port: PhyPort, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']) -> bool:
+        node_template = '/mlnxos/v1/vsr/vsr-default/interfaces/{}' + '/vlans/mode={}'.format(port_mode.lower())
+        port_vlan_requests = create_multinode_request(node_template, [port.index], request_type='action')
+        logger.info('port_vlan_requests {}'.format(port_vlan_requests))
+        try:
+            port_vlan_replies = self._sbi_xml_driver.multi_post(port_vlan_requests)
+            logger.info('port_vlan_replies {}'.format(port_vlan_replies))
+            port.mode = port_mode
+            return True
+        except Exception:
+            logger.error('problems in adding access vlan on Port {}'.format(port.name))
+            return False
 
     def _bind_vrf(self, vrf1: Vrf, vrf2: Vrf) -> bool:
         logger.warning('VRF not supported in this switch model')
@@ -199,4 +255,7 @@ class Mellanox(Switch):
         pass
 
     def commit_and_save(self) -> bool:
+        #
+        # Note: there is no need on this switch to save and commit changes done through the xml rest api
+        #
         pass
