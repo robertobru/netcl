@@ -29,7 +29,7 @@ class SwitchConfigurationException(Exception):
     pass
 
 
-class Switch(Device):
+class SwitchDataModel(Device):
     phy_ports: List[PhyPort] = []
     vlan_l3_ports: List[VlanL3Port] = []
     vrfs: List[Vrf] = []
@@ -37,6 +37,9 @@ class Switch(Device):
     config_history: List[ConfigItem] = []
     last_config: ConfigItem = None
     state: Literal["init", "ready", "config_error", "auth_error", "net_error", "executing"] = "init"
+
+
+class Switch(SwitchDataModel):
 
     @abc.abstractmethod
     def retrieve_info(self):
@@ -66,13 +69,21 @@ class Switch(Device):
     @classmethod
     def from_db(cls, device_name: str) -> Switch:
         db_data = _db.findone_DB("switches", {'name': device_name})
+        logger.debug("dbdata: {}".format(db_data))
         if not db_data:
             raise ValueError('switch {}'.format(device_name))
 
         if db_data['model'] not in os_models:
             raise ValueError('OS type {} for switch {} not found'.format(db_data['model'], device_name))
         switch_os = os_models[db_data['model']]
+        logger.debug("trying to reinitialize object from os_model: {}".format(switch_os))
         try:
+            logger.debug("module: {} data: {}".format(
+                getattr(import_module(
+                    "switch.{}".format(switch_os['module'])
+                ), switch_os['class']),
+                db_data
+            ))
             return getattr(import_module(
                     "switch.{}".format(switch_os['module'])
                 ), switch_os['class'])(**db_data)
@@ -85,6 +96,9 @@ class Switch(Device):
             _db.update_DB("switches", json.loads(self.to_switch_model().model_dump_json()), {'name': self.name})
         else:
             _db.insert_DB("switches", json.loads(self.to_switch_model().model_dump_json()))
+
+    def destroy(self):
+        _db.delete_DB("switches", {'name': self.name})
 
     def to_switch_model(self):
         return Switch.model_validate(self, from_attributes=True)

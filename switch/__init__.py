@@ -1,1 +1,1 @@
-from .switch_base import Switch
+from .switch_base import Switch, SwitchDataModel

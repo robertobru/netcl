@@ -15,21 +15,14 @@ class HpComware(Switch):
     _sbi_driver: NetmikoSbi = None
 
     def retrieve_info(self):
+        logger.info('retrieving information for switch {}'.format(self.name))
         if not self._sbi_driver:
             self._sbi_driver = NetmikoSbi(self.to_device_model())
         self.retrieve_config()
         self.parse_config()
         self.retrieve_runtime_ports()
         self.retrieve_neighbors()
-
-        print(self.model_dump())
-
-    """def get_vlans(self):
-        vlans = self._sbi_driver.get_info("display vlan all")
-        logger.info(vlans)
-        for v in vlans:
-            if int(v['vlan_id']) not in self.vlans:
-                self.vlans.append(int(v['vlan_id']))"""
+        logger.info('retrieved all the information for switch {}'.format(self.name))
 
     def _get_port_by_shortname(self, shortname: str) -> PhyPort:
         interface = None
