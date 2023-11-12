@@ -14,10 +14,13 @@ logger = create_logger('hp_comware')
 class HpComware(Switch):
     _sbi_driver: NetmikoSbi = None
 
-    def retrieve_info(self):
-        logger.info('retrieving information for switch {}'.format(self.name))
+    def reinit_sbi_drivers(self) -> None:
         if not self._sbi_driver:
             self._sbi_driver = NetmikoSbi(self.to_device_model())
+
+    def retrieve_info(self) -> None:
+        logger.info('retrieving information for switch {}'.format(self.name))
+        self.reinit_sbi_drivers()
         self.retrieve_config()
         self.parse_config()
         self.retrieve_runtime_ports()
@@ -41,7 +44,7 @@ class HpComware(Switch):
             raise ValueError('interface {} not found'.format(shortname))
         return interface
 
-    def retrieve_runtime_ports(self):
+    def retrieve_runtime_ports(self)  -> None:
         logger.debug("retrieve_runtime_ports")
         ports = self._sbi_driver.get_info("display interface brief", use_textfsm=False)
         fsm = textfsm.TextFSM(open("fsm_templates/hp_comware_interface_template"))
@@ -63,13 +66,12 @@ class HpComware(Switch):
                 interface.duplex = 'FULL'
             elif r[3][0] == 'H':
                 interface.duplex = 'HALF'
-            print(interface.model_dump())
 
-    def retrieve_config(self):
+    def retrieve_config(self) -> None:
         _config = self._sbi_driver.get_info("display current-configuration")
         self.store_config(_config)
 
-    def parse_config(self):
+    def parse_config(self) -> None:
         fsm = textfsm.TextFSM(open("fsm_templates/hp_comware_config_template"))
         res = fsm.ParseText(self.last_config.config)
         for r in res:
@@ -106,6 +108,7 @@ class HpComware(Switch):
 
                     self.phy_ports.append(PhyPort(
                         index=r[0],
+                        name=r[0],
                         trunk_vlans=trunk_vlans,
                         access_vlan=r[2] if r[2] else 1,
                         speed=0,
@@ -157,7 +160,7 @@ class HpComware(Switch):
                 vrf_obj = next(item for item in self.vrfs if item.name == vlan_interface.vrf)
                 vrf_obj.ports.append(vlan_interface)
 
-    def retrieve_neighbors(self):
+    def retrieve_neighbors(self) -> None:
         _neighbors = self._sbi_driver.get_info("display lldp neighbor-information list", use_textfsm=True)
         logger.debug('neighbours: {}, Type {}'.format(_neighbors, type(_neighbors)))
 

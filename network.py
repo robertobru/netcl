@@ -7,7 +7,7 @@ from pydantic import BaseModel
 import queue
 import threading
 import traceback
-from typing import Literal, Any
+from typing import Literal, Any, Dict
 
 _db = persistency.DB()
 logger = create_logger('network')
@@ -15,11 +15,13 @@ logger = create_logger('network')
 
 class Network:
     switches: List[Switch] = []
+    graph: nx.Graph = None
 
     def __init__(self):
         db_switches = _db.find_DB('switches', {})
         for sw in db_switches:
             self.switches.append(Switch.from_db(device_name=sw['name']))
+        self.build_graph()
 
     def onboard_switch(self, node: Device):
         new_switch = Switch.create(node)
@@ -27,30 +29,32 @@ class Network:
         if new_switch.state != 'ready':
             logger.warn('switch {} is in {} state'.format(new_switch.name, new_switch.state))
         self.switches.append(new_switch)
-        # FIXME: it is a topological change
+        self.build_graph()
 
-    def delete_switch(self, name):
-        switch_to_del = filter(lambda x: x.name == name, self.switches)
-        if not switch_to_del:
-            switch_to_del = Switch.from_db(device_name=name)
-            if not switch_to_del:
-                raise ValueError('switch to delete not found')
-        switch_to_del.destroy()
-        self.switches = [item for item in self.switches if item.name != name]
+    def delete_switch(self, switch: Switch):
+        self.switches = [item for item in self.switches if item.name != switch.name]
+        switch.destroy()
+        self.build_graph()
 
-
-    def get_graph(self):
+    def build_graph(self) -> None:
         graph = nx.Graph()
         for s in self.switches:
+            logger.debug("adding node {} to the graph".format(s.name))
             graph.add_node(s.name)
 
         for s in self.switches:
             for p in s.phy_ports:
-                if s.get_neighbors(p.name):
-                    graph.add_edge(s.name, s.get_neighbors(p.name)[0])
+                logger.debug("checking port {}".format(p.index))
+                neigh_info = s.get_neighbors(p.index)
+                if neigh_info:
+                    logger.debug("found edge between switch {} and {}".format(s.name, s.get_neighbors(p.index)))
+                    graph.add_edge(s.name, neigh_info.neighbor,
+                                   ports={s.name: p.name, neigh_info.neighbor: neigh_info.remote_interface})
 
-        return graph
+        self.graph = graph
 
+    def get_topology_dict(self) -> Dict:
+        return nx.convert.to_dict_of_dicts(self.graph)
 
 class WorkerMessage(BaseModel):
     operation: Literal['add_switch', 'del_switch']
@@ -102,6 +106,9 @@ class NetworkWorker:
 
     def process_session(self, msg, operation):
         pass
+
+    def get_topology(self) -> Dict:
+        return self.net.get_topology_dict()
 
     def destroy(self):
         pass

@@ -47,7 +47,8 @@ class Switch(SwitchDataModel):
 
     @classmethod
     def create(cls, input_data: Device) -> Switch:
-        # Fixme: check db to assure there are no other switches with the same name/address
+        if _db.exists_DB("switches", {"name": input_data.name}):
+            raise ValueError("A switch with name {} already exists".format(input_data.name))
         if input_data.model not in os_models:
             raise ValueError("Switch OS model not supported")
         switch = getattr(
@@ -84,9 +85,9 @@ class Switch(SwitchDataModel):
                 ), switch_os['class']),
                 db_data
             ))
-            return getattr(import_module(
-                    "switch.{}".format(switch_os['module'])
-                ), switch_os['class'])(**db_data)
+            switch_obj = getattr(import_module("switch.{}".format(switch_os['module'])), switch_os['class'])(**db_data)
+            switch_obj.reinit_sbi_drivers()
+            return switch_obj
         except Exception:
             logger.error(traceback.format_exc())
             raise ValueError('re-initialization for switch {} failed'.format(device_name))
@@ -115,6 +116,10 @@ class Switch(SwitchDataModel):
                 self.config_history.pop(0)
             return True
         return False
+
+    @abc.abstractmethod
+    def reinit_sbi_drivers(self) -> None:
+        pass
 
     @abc.abstractmethod
     def commit_and_save(self):
@@ -305,9 +310,10 @@ class Switch(SwitchDataModel):
     def get_vrfs(self) -> List[Vrf]:
         return self.vrfs
 
-    def get_neighbors(self, port_name=None) -> List[LldpNeighbor]:
+    def get_neighbors(self, port_name=None) -> Union[LldpNeighbor, List[LldpNeighbor]]:
         if port_name:
-            return [item.neighbor for item in self.phy_ports if item.name == port_name]
+            return next(
+                (item.neighbor for item in self.phy_ports if item.name == port_name or item.index == port_name), None)
         else:
             return [item.neighbor for item in self.phy_ports if item.neighbor]
 

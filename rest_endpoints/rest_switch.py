@@ -93,8 +93,19 @@ async def del_switch(switch_name: str) -> Dict:
                     'description': "Switch {} not found".format(switch_name)}
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=data)
         else:
-            return switch.model_dump()
+            net_worker.send_message('del_switch', switch)
+            return RestAnswer202(id=switch.name, resource="switch", operation="onboard", status="submitted")
     except Exception:
         data = {'status': 'error', 'resource': 'switch',
                 'description': "Error retrieving Switch {}".format(switch_name)}
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=data)
+
+
+@netmgt_router.get("/topology/")
+async def get_topology() -> Dict:
+    try:
+        return net_worker.get_topology()
+    except Exception:
+        data = {'status': 'error', 'resource': 'switch',
+                'description': "Error retrieving Switch list"}
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=data)

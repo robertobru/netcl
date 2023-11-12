@@ -15,11 +15,14 @@ class Mellanox(Switch):
     _sbi_xml_driver: XmlRestSbi = None
     _sbi_ssh_driver: NetmikoSbi = None
 
-    def retrieve_info(self):
+    def reinit_sbi_drivers(self) -> None:
         if not self._sbi_xml_driver:
             self._sbi_xml_driver = XmlRestSbi(self.to_device_model())
         if not self._sbi_ssh_driver:
             self._sbi_ssh_driver = NetmikoSbi(self.to_device_model())
+
+    def retrieve_info(self):
+        self.reinit_sbi_drivers()
         self.retrieve_vlans()
         self.retrieve_ports()
         self.retrieve_config()
