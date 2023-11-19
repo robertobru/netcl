@@ -2,7 +2,7 @@ from typing import Literal, Union, List, Optional
 import requests
 import xmltodict
 from pydantic import BaseModel, Field
-from tenacity import retry, stop_after_attempt
+from tenacity import retry, stop_after_attempt, retry_if_exception_type
 from netdevice import Device
 from utils import create_logger
 # from requests.packages.urllib3.exceptions import InsecureRequestWarning
@@ -103,7 +103,7 @@ class XmlRestSbi:
         self._rest_session = requests.Session()
         self.authenticate()
 
-    @retry(stop=stop_after_attempt(3))
+    @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
     def authenticate(self):
         data = {'f_user_id': self.device.user, 'f_password': self.device.passwd.get_secret_value()}
         try:
@@ -126,7 +126,7 @@ class XmlRestSbi:
             )
         )
 
-    @retry(stop=stop_after_attempt(3))
+    @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
     def post(self, msg: MlnxOsXgRequest) -> XgResponse:
         xmlstr = xmltodict.unparse(msg.dump())
         # print(xmlstr)
@@ -155,7 +155,7 @@ class XmlRestSbi:
 
         return res
 
-    @retry(stop=stop_after_attempt(3))
+    @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
     def multi_post(self, msg: List[MlnxOsXgRequestNode]) -> List[MlnxOsXgResponseNode]:
         xmlstr = xmltodict.unparse(MlnxOsXgRequest.create_multinode_node_request(msg).dump())
         headers = {'Content-Type': 'text/xml'}

@@ -7,6 +7,7 @@ import traceback
 from importlib import import_module
 from utils import persistency, create_logger
 import datetime
+from threading import Thread
 
 _db = persistency.DB()
 logger = create_logger('switch')
@@ -86,7 +87,11 @@ class Switch(SwitchDataModel):
                 db_data
             ))
             switch_obj = getattr(import_module("switch.{}".format(switch_os['module'])), switch_os['class'])(**db_data)
-            switch_obj.reinit_sbi_drivers()
+            switch_obj.state = "reinit"
+            switch_obj.to_db()
+            sbi_thread = Thread(target=switch_obj.reinit_sbi_drivers)
+            sbi_thread.start()
+            # switch_obj.reinit_sbi_drivers()
             return switch_obj
         except Exception:
             logger.error(traceback.format_exc())
@@ -117,8 +122,23 @@ class Switch(SwitchDataModel):
             return True
         return False
 
-    @abc.abstractmethod
     def reinit_sbi_drivers(self) -> None:
+        try:
+            self._reinit_sbi_drivers()
+            self.state = 'ready'
+            logger.info("switch {} passed into ready state".format(self.name))
+        except SwitchNotConnectedException:
+            self.state = 'net_error'
+            logger.error("switch {} passed into net_error state".format(self.name))
+        except SwitchNotAuthenticatedException:
+            self.state = 'auth_error'
+            logger.error("switch {} passed into auth_error state".format(self.name))
+        finally:
+            # FixMe: do we need to raise an tread event to notify the network topology in case of errors?
+            self.to_db()
+
+    @abc.abstractmethod
+    def _reinit_sbi_drivers(self) -> None:
         pass
 
     @abc.abstractmethod

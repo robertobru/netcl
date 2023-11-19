@@ -11,6 +11,9 @@ logger = create_logger('microtik')
 class Microtik(Switch):
     # _sbi_rest_driver: RestSbi = None
 
+    def _reinit_sbi_drivers(self) -> None:
+        pass
+
     def retrieve_info(self):
         self.retrieve_vlans()
         self.retrieve_ports()

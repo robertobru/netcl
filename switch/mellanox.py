@@ -15,7 +15,7 @@ class Mellanox(Switch):
     _sbi_xml_driver: XmlRestSbi = None
     _sbi_ssh_driver: NetmikoSbi = None
 
-    def reinit_sbi_drivers(self) -> None:
+    def _reinit_sbi_drivers(self) -> None:
         if not self._sbi_xml_driver:
             self._sbi_xml_driver = XmlRestSbi(self.to_device_model())
         if not self._sbi_ssh_driver:

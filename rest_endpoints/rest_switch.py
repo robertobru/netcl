@@ -104,6 +104,7 @@ async def del_switch(switch_name: str) -> Dict:
 @netmgt_router.get("/topology/")
 async def get_topology() -> Dict:
     try:
+        net_worker.net.build_graph() # to be removed, here only for debug
         return net_worker.get_topology()
     except Exception:
         data = {'status': 'error', 'resource': 'switch',

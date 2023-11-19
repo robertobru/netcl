@@ -65,7 +65,7 @@ class SwitchDataModel(Device):
     vlans: List[str] = []
     config_history: List[ConfigItem] = []
     last_config: ConfigItem = None
-    state: Literal["init", "ready", "config_error", "auth_error", "net_error", "executing"] = "init"
+    state: Literal["init", "reinit", "ready", "config_error", "auth_error", "net_error", "executing"] = "init"
 
 
 

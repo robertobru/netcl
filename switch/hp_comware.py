@@ -14,7 +14,7 @@ logger = create_logger('hp_comware')
 class HpComware(Switch):
     _sbi_driver: NetmikoSbi = None
 
-    def reinit_sbi_drivers(self) -> None:
+    def _reinit_sbi_drivers(self) -> None:
         if not self._sbi_driver:
             self._sbi_driver = NetmikoSbi(self.to_device_model())
 
