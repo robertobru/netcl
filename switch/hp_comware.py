@@ -7,7 +7,6 @@ from netaddr import IPAddress
 from utils import create_logger
 from typing import List, Literal
 
-
 logger = create_logger('hp_comware')
 
 
@@ -44,7 +43,7 @@ class HpComware(Switch):
             raise ValueError('interface {} not found'.format(shortname))
         return interface
 
-    def retrieve_runtime_ports(self)  -> None:
+    def retrieve_runtime_ports(self) -> None:
         logger.debug("retrieve_runtime_ports")
         ports = self._sbi_driver.get_info("display interface brief", use_textfsm=False)
         fsm = textfsm.TextFSM(open("fsm_templates/hp_comware_interface_template"))
@@ -59,7 +58,7 @@ class HpComware(Switch):
                 if '(a)' in r[2]:  # remove autoneg symbol
                     r[2] = r[2][:-3]
                 multiplier = 1
-                if r[2][-1] == 'G': # checking if speed is in Gigabit or Megabit
+                if r[2][-1] == 'G':  # checking if speed is in Gigabit or Megabit
                     multiplier = 1000
                 interface.speed = int(r[2][:-1]) * multiplier
             if r[3][0] == 'F':
@@ -97,7 +96,7 @@ class HpComware(Switch):
                         if not found_to and v != 'to':
                             trunk_vlans.append(int(v))
                         elif found_to and v != 'to':
-                            trunk_vlans = trunk_vlans + [int(index) for index in range(trunk_vlans[-1] +1, int(v))]
+                            trunk_vlans = trunk_vlans + [int(index) for index in range(trunk_vlans[-1] + 1, int(v))]
                             found_to = False
                         elif v == 'to':
                             found_to = True
@@ -169,16 +168,123 @@ class HpComware(Switch):
             interface.neighbor = LldpNeighbor(neighbor=n['neighbor'], remote_interface=n['neighbor_interface'])
 
     def _add_vlan(self, vlan_ids: List[int]):
-        pass
+        """
+        Add vlans to the hp-comware switch
+        :param vlan_ids: list
+        :return: list of the text commands as a separate list to create vlans, TODO add vlan name, and add description
+        """
+        vlan_create_cmd = list()
+        if not len(vlan_ids):
+            return "Empty vlan list"
+        else:
+            for vlan_id in vlan_ids:
+                vlan_create_cmd.append([f'vlan {vlan_id}', f'name vlan {vlan_id}', f'description vlan {vlan_id}'])
+        return vlan_create_cmd
 
     def _del_vlan(self, vlan_ids: List[int]):
-        pass
+        """
+            Delete vlans from the hp-comware switch
+            :param vlan_ids: list
+            :return: list of the text commands as a separate list to delete vlans
+            """
+        vlan_delete_cmd = list()
+        if not len(vlan_ids):
+            return "Empty vlan list"
+        else:
+            for vlan_id in vlan_ids:
+                vlan_delete_cmd.append([f'undo vlan {vlan_id}'])
+        return vlan_delete_cmd
 
     def _add_vlan_to_port(self, vlan_id: int, port: PhyPort, pvid: bool = False) -> bool:
-        pass
+        """
+        Configure VLAN settings for a given interface type.
+        :param vlan_id: int - VLAN ID to configure
+        :param port: PhyPort - Physical port object
+        :param pvid: bool - (Optional) PVID parameter
+        :return: list[str] - List of commands applied
+        """
+        # validate VLAN-ID's different conditions
+        if not port.index:
+            raise ValueError("Port index cannot be empty!")
 
-    def _del_vlan_to_port(self, vlan_ids: List[int], port: PhyPort) -> bool:
-        pass
+        if not (1 <= vlan_id <= 4094):
+            raise ValueError("VLAN ID must be an integer between 1 and 4094 inclusive.")
+
+        # check the mode of PhyPort
+        if port.mode == "ACCESS":
+            port.trunk_vlans = [vlan_id]
+            set_port_type_and_vlan = [
+                f'interface {port.index}',
+                'port link-type access',
+                f'port access vlan {vlan_id}'
+            ]
+        elif port.mode in ["TRUNK", "HYBRID"]:
+            port.trunk_vlans.append(vlan_id)
+            if port.mode == "TRUNK":
+                set_port_type_and_vlan = [
+                    f'interface {port.index}',
+                    'port link-type trunk',
+                    f'port trunk permit vlan {vlan_id}'
+                ]
+            elif port.mode == "HYBRID":
+                set_port_type_and_vlan = [
+                    f'interface {port.index}',
+                    'port link-type hybrid',
+                    f'port hybrid vlan {vlan_id}'
+                ]
+        else:
+            raise ValueError("PhyPort has no interface mode specified!")
+
+        # Create the requested vlan
+        set_vlan_port = [
+            f'vlan {vlan_id}',
+            f'name set for VLAN {vlan_id}',
+            f'description set for VLAN {vlan_id}',
+        ]
+        commands_list = set_vlan_port + set_port_type_and_vlan
+        return commands_list
+
+    def _del_vlan_to_port(self, vlan_ids: List[int], port: PhyPort):
+        """
+        Delete vlans from the port ACCESS TRUNK HYBRID
+        :param vlan_id: list - VLAN IDs to configure
+        :param port: PhyPort - Physical port object
+        :return: list[str] - List of commands applied
+        """
+        vlan_delete_cmd = list()
+
+        if not vlan_ids:
+            raise ValueError("Empty VLAN list")
+        if not port.index:
+            raise ValueError("Port index cannot be empty!")
+
+        invalid_vlans_lst = list(filter(lambda vlan: not (1 <= vlan <= 4094), vlan_ids))
+        if invalid_vlans_lst:
+            raise ValueError("VLAN ID must be an integer between 1 and 4094 inclusive.")
+
+        # check the mode of PhyPort
+        commands_list = []
+        if port.mode == "ACCESS":
+            # port.trunk_vlans = vlan_ids
+            if len(vlan_ids) > 1:
+                raise ValueError("in ACCESS port there is only one vlan id!")
+            else:
+                for _ in vlan_ids:
+                    commands_list.append([
+                        f'interface {port.index}',
+                        f'undo port access vlan'
+                    ])
+
+        elif port.mode in ["TRUNK", "HYBRID"]:
+            for vlan_id in vlan_ids:
+                commands_list.append([
+                    f'interface {port.index}',
+                    f'undo port {"trunk" if port.mode == "TRUNK" else "hybrid"} vlan {vlan_id}'
+                ])
+        else:
+            raise ValueError("PhyPort has no interface mode specified!")
+
+        return commands_list
 
     def _set_port_mode(self, port: PhyPort, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']) -> bool:
         pass
