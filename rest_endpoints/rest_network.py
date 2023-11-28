@@ -79,7 +79,7 @@ async def create_net_vlan(msg: NetVlan) -> RestAnswer202:
                 'description': "vlan {} already existing".format(msg.vid)}
         raise HTTPException(status_code=status.HTTP_406_NOT_ACCEPTABLE, detail=data)
     try:
-        net_worker.send_message('create_net_vlan', worker_msg)
+        net_worker.send_message(worker_msg)
         return worker_msg.produce_rest_answer_202()
     except Exception:
         logger.error(traceback.format_exc())
@@ -94,7 +94,7 @@ async def del_net_vlan(msg: NetVlan) -> RestAnswer202:
                 'description': "vlan {} not existing".format(msg.vid)}
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=data)
     try:
-        net_worker.send_message('delete_net_vlan', worker_msg)
+        net_worker.send_message(worker_msg)
         return worker_msg.produce_rest_answer_202()
     except Exception:
         logger.error(traceback.format_exc())
@@ -109,7 +109,7 @@ async def mod_net_vlan(msg: NetVlan) -> RestAnswer202:
                 'description': "vlan {} not existing".format(msg.vid)}
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=data)
     try:
-        net_worker.send_message('mod_net_vlan', worker_msg)
+        net_worker.send_message(worker_msg)
         return worker_msg.produce_rest_answer_202()
     except Exception:
         logger.error(traceback.format_exc())

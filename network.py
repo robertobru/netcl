@@ -213,9 +213,9 @@ class NetworkWorker:
                         self.net.onboard_switch(s_input.request_msg)
                     case 'del_switch':
                         self.net.delete_switch(s_input.request_msg)
-                    case 'delete_net_vlan':
+                    case 'del_net_vlan':
                         self.net.delete_net_vlan(s_input.request_msg)
-                    case 'create_net_vlan':
+                    case 'add_net_vlan':
                         self.net.create_net_vlan(s_input.request_msg)
                     case _:
                         raise ValueError('msg operation not found')
