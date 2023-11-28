@@ -5,6 +5,8 @@ switch2 = Switch.from_db("hp5920")
 # for port in switch2.phy_ports:
 # switch2.retrieve_neighbors()
 
+switch2._sbi_driver.send_cmd("",  {})
+
 print(switch2.get_neighbors())
 # switch2.to_db()
 
