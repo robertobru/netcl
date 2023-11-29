@@ -102,7 +102,7 @@ class XmlRestSbi:
         logger.debug("Creating REST session")
         self._rest_session = requests.Session()
         self.authenticate()
-
+#fai un test
     @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
     def authenticate(self):
         data = {'f_user_id': self.device.user, 'f_password': self.device.passwd.get_secret_value()}
@@ -125,7 +125,9 @@ class XmlRestSbi:
                 }
             )
         )
-
+#due parametri, usare anche la post
+    # comando /ip/address
+    # data {data}
     @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
     def post(self, msg: MlnxOsXgRequest) -> XgResponse:
         xmlstr = xmltodict.unparse(msg.dump())

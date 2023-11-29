@@ -15,6 +15,7 @@ logger = create_logger('switch')
 os_models = {
     'hp_comware': {'module': 'hp_comware', 'class': 'HpComware'},
     'mellanox': {'module': 'mellanox', 'class': 'Mellanox'},
+    'microtik': {'module': 'microtik', 'class': 'Microtik'},
 }
 
 
@@ -45,7 +46,7 @@ class Switch(SwitchDataModel):
     @abc.abstractmethod
     def retrieve_info(self):
         pass
-
+ #a seconda delle classi figlie passate, cinstalla l'oggetto switch
     @classmethod
     def create(cls, input_data: Device) -> Switch:
         if _db.exists_DB("switches", {"name": input_data.name}):

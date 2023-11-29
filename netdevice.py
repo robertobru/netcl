@@ -24,6 +24,7 @@ class LldpNeighbor(BaseModel):
     neighbor: str
     remote_interface: str
 
+#definition of the physical port and its characteristics(LLDP)
 class PhyPort(BaseModel):
     index: str
     name: Union[str, None] = None
