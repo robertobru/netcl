@@ -1,7 +1,7 @@
 from fastapi import APIRouter, status, HTTPException
 from rest_endpoints.rest_models import RestAnswer202 , NetworkVrf, NetVlan, PortToNetVlans, NetVlanMsg, \
     PortToNetVlansMsg
-from typing import List, Dict, Literal, Union
+from typing import List, Dict, Union
 from utils import persistency, create_logger
 from network import net_worker
 import traceback
@@ -14,6 +14,7 @@ net_api_router = APIRouter(
     tags=["Network Management"],
     responses={status.HTTP_404_NOT_FOUND: {"description": "Not found"}},
 )
+
 
 @net_api_router.get("/vrf")
 async def get_vrf(name: str | None = None) -> Union[NetworkVrf, List[NetworkVrf]]:
@@ -71,7 +72,7 @@ async def get_vlan_topology(vlan_id: int) -> Dict:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=data)
 
 
-@net_api_router.post("/vlan", status_code=status.HTTP_202_ACCEPTED)
+@net_api_router.post("/vlan", response_model=RestAnswer202, status_code=status.HTTP_202_ACCEPTED)
 async def create_net_vlan(msg: NetVlan) -> RestAnswer202:
     worker_msg = NetVlanMsg.model_validate(msg.model_dump().update({'operation': 'add_net_vlan'}))
     if net_worker.net.get_switch_by_vlan_interface(msg.vid):
@@ -86,7 +87,7 @@ async def create_net_vlan(msg: NetVlan) -> RestAnswer202:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@net_api_router.delete("/vlan", status_code=status.HTTP_202_ACCEPTED)
+@net_api_router.delete("/vlan", response_model=RestAnswer202, status_code=status.HTTP_202_ACCEPTED)
 async def del_net_vlan(msg: NetVlan) -> RestAnswer202:
     worker_msg = NetVlanMsg.model_validate(msg.model_dump().update({'operation': 'del_net_vlan'}))
     if not net_worker.net.get_switch_by_vlan_interface(msg.vid):
@@ -101,7 +102,7 @@ async def del_net_vlan(msg: NetVlan) -> RestAnswer202:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@net_api_router.put("/vlan", status_code=status.HTTP_202_ACCEPTED)
+@net_api_router.put("/vlan", response_model=RestAnswer202, status_code=status.HTTP_202_ACCEPTED)
 async def mod_net_vlan(msg: NetVlan) -> RestAnswer202:
     worker_msg = NetVlanMsg.model_validate(msg.model_dump().update({'operation': 'mod_net_vlan'}))
     if not net_worker.net.get_switch_by_vlan_interface(msg.vid):
@@ -115,7 +116,8 @@ async def mod_net_vlan(msg: NetVlan) -> RestAnswer202:
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-@net_api_router.get("/vlan/{vid}", status_code=status.HTTP_200_OK)
+
+@net_api_router.get("/vlan/{vid}", response_model=NetVlan, status_code=status.HTTP_200_OK)
 async def get_net_vlan(vid: int) -> NetVlan:
     switch = net_worker.net.get_switch_by_vlan_interface(vid)
     if not switch:
@@ -124,13 +126,33 @@ async def get_net_vlan(vid: int) -> NetVlan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=data)
     try:
         vlan_intf = next(item for item in switch.vlan_l3_ports if item.vlan == vid)
-        data = {
+        return NetVlan.model_validate({
             'vid': vid,
-            'cidr': vlan_intf.ipaddress,
+            'cidr': vlan_intf.cidr,
             'gateway': vlan_intf.ipaddress,
             'group': vlan_intf.vrf,
             'description': vlan_intf.description
-        }
+        })
     except Exception:
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@net_api_router.post("/vlan/port", response_model=RestAnswer202, status_code=status.HTTP_202_ACCEPTED)
+async def create_port_vlan_assignment(msg: PortToNetVlans) -> RestAnswer202:
+    pass
+
+
+@net_api_router.delete("/vlan/port", response_model=RestAnswer202, status_code=status.HTTP_202_ACCEPTED)
+async def delete_port_vlan_assignment(msg: PortToNetVlans) -> RestAnswer202:
+    pass
+
+
+@net_api_router.put("/vlan/port", response_model=RestAnswer202, status_code=status.HTTP_202_ACCEPTED)
+async def modify_port_vlan_assignment(msg: PortToNetVlans) -> RestAnswer202:
+    pass
+
+
+@net_api_router.get("/vlan/port/{}/{}", response_model=PortToNetVlans, status_code=status.HTTP_200_OK)
+async def delete_port_vlan_assignment(switch_name: str, port_name: str) -> PortToNetVlans:
+    pass

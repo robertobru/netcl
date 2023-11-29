@@ -210,13 +210,13 @@ class NetworkWorker:
             try:
                 match s_input.operation:
                     case 'add_switch':
-                        self.net.onboard_switch(s_input.request_msg)
+                        self.net.onboard_switch(Device.model_validate(s_input.model_dump()))
                     case 'del_switch':
-                        self.net.delete_switch(s_input.request_msg)
+                        self.net.delete_switch(s_input.switch)
                     case 'del_net_vlan':
-                        self.net.delete_net_vlan(s_input.request_msg)
+                        self.net.delete_net_vlan(s_input)
                     case 'add_net_vlan':
-                        self.net.create_net_vlan(s_input.request_msg)
+                        self.net.create_net_vlan(s_input)
                     case _:
                         raise ValueError('msg operation not found')
                 # self.process_session(s_input.request_msg, s_input.operation)

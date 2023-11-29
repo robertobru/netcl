@@ -1,5 +1,6 @@
 from pydantic import BaseModel, AnyHttpUrl, IPvAnyNetwork, IPvAnyInterface, Field, field_validator
-from netdevice import Vrf
+from netdevice import Vrf, Device
+from switch import Switch
 from typing import List, Union, Literal
 from uuid import UUID, uuid4
 from utils import persistency
@@ -25,7 +26,7 @@ class RestAnswer202(BaseModel):
 
 class WorkerMsg(BaseModel):
     operation_id: str = Field(default_factory=lambda: str(uuid4()))
-    operation: Literal['add_switch', 'del_switch', 'add_net_vlan', 'del_net_vlan']
+    operation: Literal['add_switch', 'del_switch', 'add_net_vlan', 'del_net_vlan', 'mod_net_vlan']
     status: Literal['InProgress', 'Failed', 'Success'] = 'InProgress'
     start_time: datetime = Field(default_factory=datetime.now)
     end_time: datetime = None
@@ -72,8 +73,16 @@ class NetVlan(CallbackRequest):
     description: Union[str, None] = None
 
 
-class NetVlanMsg(NetVlan, WorkerMsg):
+class SwitchMsg(Device, WorkerMsg):
     pass
+
+
+class DelSwitchMsg(WorkerMsg):
+    switch: Switch
+
+
+class NetVlanMsg(NetVlan, WorkerMsg):
+    end_time: datetime = None
 
 
 class PortToNetVlans(CallbackRequest):
