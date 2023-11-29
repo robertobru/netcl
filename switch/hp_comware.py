@@ -7,7 +7,6 @@ from netaddr import IPAddress
 from utils import create_logger
 from typing import List, Literal
 
-
 logger = create_logger('hp_comware')
 
 
@@ -44,7 +43,7 @@ class HpComware(Switch):
             raise ValueError('interface {} not found'.format(shortname))
         return interface
 
-    def retrieve_runtime_ports(self)  -> None:
+    def retrieve_runtime_ports(self) -> None:
         logger.debug("retrieve_runtime_ports")
         ports = self._sbi_driver.get_info("display interface brief", use_textfsm=False)
         fsm = textfsm.TextFSM(open("fsm_templates/hp_comware_interface_template"))
@@ -59,7 +58,7 @@ class HpComware(Switch):
                 if '(a)' in r[2]:  # remove autoneg symbol
                     r[2] = r[2][:-3]
                 multiplier = 1
-                if r[2][-1] == 'G': # checking if speed is in Gigabit or Megabit
+                if r[2][-1] == 'G':  # checking if speed is in Gigabit or Megabit
                     multiplier = 1000
                 interface.speed = int(r[2][:-1]) * multiplier
             if r[3][0] == 'F':
@@ -97,7 +96,7 @@ class HpComware(Switch):
                         if not found_to and v != 'to':
                             trunk_vlans.append(int(v))
                         elif found_to and v != 'to':
-                            trunk_vlans = trunk_vlans + [int(index) for index in range(trunk_vlans[-1] +1, int(v))]
+                            trunk_vlans = trunk_vlans + [int(index) for index in range(trunk_vlans[-1] + 1, int(v))]
                             found_to = False
                         elif v == 'to':
                             found_to = True
@@ -169,31 +168,250 @@ class HpComware(Switch):
             interface.neighbor = LldpNeighbor(neighbor=n['neighbor'], remote_interface=n['neighbor_interface'])
 
     def _add_vlan(self, vlan_ids: List[int]):
-        pass
+        """
+        Add vlans to the hp-comware switch
+        :param vlan_ids: list
+        :return: list of the text commands as a separate list to create vlans, TODO add vlan name, and add description
+        """
+        vlan_create_cmd = list()
+        if not vlan_ids:
+            raise (ValueError("Empty vlan list"))
+
+        invalid_vlans_lst = list(filter(lambda vlan: not (1 <= vlan <= 4094), vlan_ids))
+        if invalid_vlans_lst:
+            raise ValueError("VLAN ID must be an integer between 1 and 4094 inclusive.")
+        else:
+            for vlan_id in vlan_ids:
+                vlan_create_cmd.append([f'vlan {vlan_id}', f'name vlan {vlan_id}', f'description vlan {vlan_id}'])
+
+        # send commands to the swicth
+        res = self._sbi_driver.send_command(commands=vlan_create_cmd, enable=True)
+
+        return res
 
     def _del_vlan(self, vlan_ids: List[int]):
-        pass
+        """
+        Delete vlans from the hp-comware switch
+        :param vlan_ids: list
+        :return: list of the text commands as a separate list to delete vlans
+        """
+        vlan_delete_cmd = list()
+        if not vlan_ids:
+            return "Empty vlan list"
+
+        invalid_vlans_lst = list(filter(lambda vlan: not (1 <= vlan <= 4094), vlan_ids))
+        if invalid_vlans_lst:
+            raise ValueError("VLAN ID must be an integer between 1 and 4094 inclusive.")
+        else:
+            for vlan_id in vlan_ids:
+                vlan_delete_cmd.append([f'undo vlan {vlan_id}'])
+
+        # send commands to the swicth
+        res = self._sbi_driver.send_command(commands=vlan_delete_cmd, enable=True)
+        return res
 
     def _add_vlan_to_port(self, vlan_id: int, port: PhyPort, pvid: bool = False) -> bool:
-        pass
+        """
+        Configure VLAN settings for a given interface type.
+        :param vlan_id: int - VLAN ID to configure
+        :param port: PhyPort - Physical port object
+        :param pvid: bool - (Optional) PVID parameter
+        :return: list[str] - List of commands applied
+        """
+        # validate VLAN-ID's different conditions
+        if not port.index:
+            raise ValueError("Port index cannot be empty!")
 
-    def _del_vlan_to_port(self, vlan_ids: List[int], port: PhyPort) -> bool:
-        pass
+        if not (1 <= vlan_id <= 4094):
+            raise ValueError("VLAN ID must be an integer between 1 and 4094 inclusive.")
 
-    def _set_port_mode(self, port: PhyPort, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']) -> bool:
-        pass
+        # check the mode of PhyPort
+        if port.mode == "ACCESS":
+            port.trunk_vlans = [vlan_id]  # fixme: I think it must be empty list. Ask Roberto
+            set_port_type_and_vlan = [
+                f'interface {port.index}',
+                'port link-type access',
+                f'port access vlan {vlan_id}'
+            ]
+        elif port.mode in ["TRUNK", "HYBRID"]:
+            port.trunk_vlans.append(vlan_id)
+            if port.mode == "TRUNK":
+                set_port_type_and_vlan = [
+                    f'interface {port.index}',
+                    'port link-type trunk',
+                    f'port trunk permit vlan {vlan_id}'
+                ]
+            elif port.mode == "HYBRID":
+                set_port_type_and_vlan = [
+                    f'interface {port.index}',
+                    'port link-type hybrid',
+                    f'port hybrid vlan {vlan_id}'
+                ]
+        else:
+            raise ValueError("PhyPort has no interface mode specified!")
+
+        # Create the requested vlan
+        set_vlan_port = [
+            f'vlan {vlan_id}',
+            f'name set for VLAN {vlan_id}',
+            f'description set for VLAN {vlan_id}',
+        ]
+        commands_list = set_vlan_port + set_port_type_and_vlan
+
+        # send commands to the swicth
+        res = self._sbi_driver.send_command(commands=commands_list, enable=True)
+        return res
+
+    def _del_vlan_to_port(self, vlan_ids: List[int], port: PhyPort):
+        """
+        Delete vlans from the port ACCESS TRUNK HYBRID
+        :param vlan_id: list - VLAN IDs to configure
+        :param port: PhyPort - Physical port object
+        :return: list[str] - List of commands applied
+        """
+        vlan_delete_cmd = list()
+
+        if not vlan_ids:
+            raise ValueError("Empty VLAN list")
+        if not port.index:
+            raise ValueError("Port index cannot be empty!")
+
+        invalid_vlans_lst = list(filter(lambda vlan: not (1 <= vlan <= 4094), vlan_ids))
+        if invalid_vlans_lst:
+            raise ValueError("VLAN ID must be an integer between 1 and 4094 inclusive.")
+
+        # check the mode of PhyPort
+        commands_list = []
+        if port.mode == "ACCESS":
+            # port.trunk_vlans = vlan_ids
+            if len(vlan_ids) > 1:
+                raise ValueError("in ACCESS port there is only one vlan id!")
+            else:
+                for _ in vlan_ids:
+                    commands_list.append([
+                        f'interface {port.index}',
+                        f'undo port access vlan'
+                    ])
+
+        elif port.mode in ["TRUNK", "HYBRID"]:
+            for vlan_id in vlan_ids:
+                commands_list.append([
+                    f'interface {port.index}',
+                    f'undo port {"trunk" if port.mode == "TRUNK" else "hybrid"} vlan {vlan_id}'
+                ])
+        else:
+            raise ValueError("PhyPort has no interface mode specified!")
+        # send commands to the swicth
+        res = self._sbi_driver.send_command(commands=commands_list, enable=True)
+        return res
+
+    def _set_port_mode(self, port: PhyPort, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']):
+        """
+        Set the interface mode (ACCESS, TRUNK, or HYBRID) for the given PhyPort object.
+
+        :param port: PhyPort - Physical port object to configure.
+        :param port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK'] - Mode to set for the port.
+        :return: list[str] - List of configuration commands applied.
+        :raises ValueError: If port index is empty or if an invalid interface mode is specified.
+        """
+
+        if not port.index:
+            raise ValueError("Port index cannot be empty!")
+        # check the mode of PhyPort has been changed
+        commands_list = []
+        if port_mode == "ACCESS":
+            port.mode = "ACCESS"
+            port.trunk_vlans = []  # Clear trunk_vlans for ACCESS mode
+            commands_list = [
+                f'interface {port.index}',
+                'port link-type access',
+            ]
+        elif port_mode in ["TRUNK", "HYBRID"]:
+            port.mode = port_mode
+            commands_list = [
+                f'interface {port.index}',
+                f'port link-type {"trunk" if port.mode == "TRUNK" else "hybrid"}'
+            ]
+        else:
+            raise ValueError("PhyPort has no interface mode specified!")
+        # send commands to the switch
+        res = self._sbi_driver.send_command(commands=commands_list, enable=True)
+        return res
 
     def _bind_vrf(self, vrf1: Vrf, vrf2: Vrf) -> bool:
+        # What does it mean? all the vrf's vlans via bgp ? how define rd?
+        # or via static route ?
         pass
 
     def _unbind_vrf(self, vrf1: Vrf, vrf2: Vrf) -> bool:
         pass
 
     def _add_vlan_to_vrf(self, vrf: Vrf, vlan_interface: VlanL3Port) -> bool:
-        pass
+        """
+        Creates a VLAN interface and associates it with a specified VRF (VPN instance).
+
+        :param vrf: Vrf - The VRF (VPN instance) to associate the VLAN interface with.
+        :param vlan_interface: VlanL3Port - Details of the VLAN interface to be added.
+        :return: list[str] - List of commands to configure the VLAN and VRF association.
+        :raises ValueError: If VRF name is empty or if VLAN interface IP or subnet mask is not set.
+        """
+        # check conditions
+        if not vrf.name:
+            raise ValueError("VRF name cannot be empty!")
+        if not vlan_interface.ipaddress or not vlan_interface.subnet_mask:
+            raise ValueError("The VLAN interface IP or subnet mask is not set!")
+
+        # Ckeck and create vlan if not existed
+        create_vlan_cmd = [
+            f'vlan {vlan_interface.vlan}',
+            # f'name vlan connected to vlaninterface {VlanL3Port.ipaddress}',
+            # f'description vlan connected to vrf {Vrf.name}',
+        ]
+        # Bind vlan-interface to the vrf
+        add_vlan_interface_to_vpn_instance_cmd = [
+            f'interface Vlan-interface {vlan_interface.vlan}',
+            f'ip binding vpn-instance {vrf.name}',
+            f'ip address {vlan_interface.ipaddress} {vlan_interface.subnet_mask}'
+        ]
+        # add vrf name to vlan_interface
+        vlan_interface.vrf = vrf.name
+        command_list = create_vlan_cmd + add_vlan_interface_to_vpn_instance_cmd
+
+        # send commands to the swicth
+        res = self._sbi_driver.send_command(commands=command_list, enable=True)
+        return res
 
     def _del_vlan_to_vrf(self, vrf: Vrf, vlan_interface: VlanL3Port) -> bool:
-        pass
+        """
+        Deletes a VLAN interface from a specified VRF (VPN instance).
+
+        :param vrf: Vrf - The VRF (VPN instance) to delete the VLAN-interface from.
+        :param vlan_interface: VlanL3Port - Details of the VLAN interface to be added.
+        :return: list[str] - List of commands to configure the VLAN-interfaces.
+        :raises ValueError: If VRF name is empty. The Vlan is checked by the Pydantic.
+        """
+
+        # check conditions
+        if not vrf.name:
+            raise ValueError("VRF name cannot be empty!")
+
+        # Bind vlan-interface to the vrf
+        command_list = [
+            f'interface Vlan-interface {vlan_interface.vlan}',
+            f'undo ip binding vpn-instance {vrf.name}',
+        ]
+        # remove vrf name from vlan_interface
+        vlan_interface.vrf = ""
+        # send commands to the swicth
+        res = self._sbi_driver.send_command(commands=command_list, enable=True)
+        return res
 
     def commit_and_save(self):
-        pass
+        """
+        Save the configuration to the switch
+        :return:
+        """
+        command_list = ["save force"]
+        res = self._sbi_driver.send_command(commands=command_list, enable=True)
+        return res
+
