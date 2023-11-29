@@ -11,6 +11,7 @@ from utils import create_logger
 from switch.switch_base import SwitchNotConnectedException, SwitchNotAuthenticatedException, \
     SwitchConfigurationException
 from typing import List, Literal
+
 logger = create_logger('routeros')
 
 
@@ -40,8 +41,23 @@ class RosRestSbi:
             )
         except requests.exceptions.ConnectionError:
             raise SwitchNotConnectedException
-            logger.error('Error {}, {}'.format(responce.status_code, responce.content))
+        logger.error('code {}, {}'.format(responce.status_code, responce.content))
 
+    @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
+    def post(self, url, msg: dict) -> json:
+        data = json.dumps(msg)
+        try:
+            responce = self._rest_session.post(
+                'http://{}/rest/{}/{}'.format(self.device.address, url, data),
+                auth=HTTPBasicAuth(self.device.user, self.device.passwd),
+                verify=False,
+                timeout=(30, 60)
+            )
+        except requests.exceptions.ConnectionError:
+            raise SwitchNotConnectedException
+        logger.debug('REST status {}\n{}'.format(responce.status_code, responce.text))
+        if responce.status_code != 200:
+            raise SwitchNotAuthenticatedException()
 
     # due parametri, usare anche la post
     # comando /ip/address

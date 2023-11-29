@@ -154,7 +154,6 @@ class XmlRestSbi:
             else:
                 raise SwitchConfigurationException("error no. {} - Message: {}".format(
                     res.xgStatus.statusCode, res.xgStatus.statusMsg))
-
         return res
 
     @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)

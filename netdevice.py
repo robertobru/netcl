@@ -63,9 +63,9 @@ class SwitchDataModel(Device):
     phy_ports: List[PhyPort] = []
     vlan_l3_ports: List[VlanL3Port] = []
     vrfs: List[Vrf] = []
-    vlans: List[str] = []
+    vlans: List[int] = []
     config_history: List[ConfigItem] = []
-    last_config: ConfigItem = None
+    last_config: Union[ConfigItem, None] = None
     state: Literal["init", "reinit", "ready", "config_error", "auth_error", "net_error", "executing"] = "init"
 
 
