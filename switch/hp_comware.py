@@ -339,9 +339,38 @@ class HpComware(Switch):
         return res
 
     def _bind_vrf(self, vrf1: Vrf, vrf2: Vrf) -> bool:
-        # What does it mean? all the vrf's vlans via bgp ? how define rd?
-        # or via static route ?
-        pass
+        """
+        Binds two Virtual Routing and Forwarding (VRF) instances by configuring VPN targets
+        for export and import of extcommunity attributes.
+
+        :param vrf1: VRF instance 1
+        :param vrf2: VRF instance 2
+        :return: Boolean indicating success or failure of the binding operation
+        """
+        # configure vpn-target for vrf1 export-extcommunity
+        if vrf1.rd not in vrf1.rd_export:
+            vrf1.rd_export.append(vrf1.rd)
+        vrf1_conf_cmds = [f'ip vpn-instance {vrf1.name}',
+                          f"vpn-target {vrf1.rd_export} export-extcommunity ",
+                          ]
+        # configure vpn-target for vrf1 import-extcommunity
+        [vrf1.rd_import.append(vrf2_rd) for vrf2_rd in vrf2.rd_export if vrf2_rd not in vrf1.rd_import]
+        vrf1_conf_cmds.append(f"vpn-target {vrf1.rd_import} import-extcommunity")
+
+        # configure vpn-target for vrf2 export-extcommunity
+        if vrf2.rd not in vrf2.rd_export:
+            vrf2.rd_export.append(vrf2.rd)
+        vrf2_conf_cmds = [f'ip vpn-instance {vrf2.name}',
+                          f"vpn-target {vrf2.rd_export} export-extcommunity ",
+                          ]
+        # configure vpn-target for vrf2 import-extcommunity
+        [vrf2.rd_import.append(vrf1_rd) for vrf1_rd in vrf1.rd_export if vrf1_rd not in vrf2.rd_import]
+        vrf2_conf_cmds.append(f"vpn-target {vrf2.rd_import} import-extcommunity")
+
+        commands_list = vrf1_conf_cmds + vrf2_conf_cmds
+        res = self._sbi_driver.send_command(commands=commands_list, enable=True)
+
+        return res
 
     def _unbind_vrf(self, vrf1: Vrf, vrf2: Vrf) -> bool:
         pass
