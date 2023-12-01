@@ -30,6 +30,7 @@ class WorkerMsg(BaseModel):
     status: Literal['InProgress', 'Failed', 'Success'] = 'InProgress'
     start_time: datetime = Field(default_factory=datetime.now)
     end_time: datetime = None
+    # error_detail: Union[None, str] = str
 
     def produce_rest_answer_202(self) -> RestAnswer202:
         self.to_db()
@@ -82,7 +83,7 @@ class DelSwitchMsg(WorkerMsg):
 
 
 class NetVlanMsg(NetVlan, WorkerMsg):
-    end_time: datetime = None
+    pass
 
 
 class PortToNetVlans(CallbackRequest):

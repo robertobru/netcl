@@ -1,5 +1,6 @@
 from __future__ import annotations  # needed to annotate class methods returning instances
 from netdevice import Device, PhyPort, VlanL3Port, Vrf, ConfigItem, LldpNeighbor
+from .switch_models import SwitchRequestVlanL3Port
 import abc
 import json
 from typing import List, Literal, Union
@@ -303,11 +304,14 @@ class Switch(SwitchDataModel):
     def _unbind_vrf(self, vrf1: Vrf, vrf2: Vrf) -> bool:
         pass
 
-    def add_vlan_to_vrf(self, vrf_name: str, vlan_interface: VlanL3Port) -> bool:
-        pass
+    def add_vlan_to_vrf(self, vrf: Vrf, vlan_interface: SwitchRequestVlanL3Port) -> bool:
+        if vrf.vid not in self.vlans:
+            logger.warn("vlan {} not configured on switch {}. Adding it.".format(vrf.vid, self.name))
+            self.add_vlan([vrf.vid])
+        return self._add_vlan_to_vrf(vrf, vlan_interface)
 
     @abc.abstractmethod
-    def _add_vlan_to_vrf(self, vrf: Vrf, vlan_interface: VlanL3Port) -> bool:
+    def _add_vlan_to_vrf(self, vrf: Vrf, vlan_interface: SwitchRequestVlanL3Port) -> bool:
         pass
 
     def del_vlan_to_vrf(self, vrf_name: str, vlan_id: str) -> bool:
