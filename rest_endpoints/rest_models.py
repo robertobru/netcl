@@ -1,5 +1,6 @@
 from pydantic import BaseModel, AnyHttpUrl, IPvAnyNetwork, IPvAnyInterface, Field, field_validator
-from netdevice import Vrf, Device
+from netdevice import Device
+from switch.switch_models import Vrf
 from switch import Switch
 from typing import List, Union, Literal
 from uuid import UUID, uuid4

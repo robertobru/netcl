@@ -1,6 +1,6 @@
 from sbi.routeros import RosRestSbi
 from .switch_base import Switch
-from netdevice import PhyPort, VlanL3Port, LldpNeighbor, Vrf
+from .switch_models import LldpNeighbor, PhyPort, VlanL3Port, Vrf
 from pydantic import IPvAnyInterface
 from netaddr import IPAddress
 from utils import create_logger

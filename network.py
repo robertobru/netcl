@@ -1,6 +1,7 @@
 import networkx as nx
 from switch import Switch
-from netdevice import Device, VlanL3Port
+from netdevice import Device
+from switch.switch_models import VlanL3Port
 from typing import List, Union, Tuple
 from utils import persistency, create_logger
 from rest_endpoints.rest_models import WorkerMsg, NetVlanMsg

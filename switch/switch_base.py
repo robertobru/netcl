@@ -1,6 +1,6 @@
 from __future__ import annotations  # needed to annotate class methods returning instances
-from netdevice import Device, PhyPort, VlanL3Port, Vrf, ConfigItem, LldpNeighbor
-from .switch_models import SwitchRequestVlanL3Port
+from netdevice import Device
+from .switch_models import SwitchRequestVlanL3Port, ConfigItem, LldpNeighbor, PhyPort, VlanL3Port, Vrf
 import abc
 import json
 from typing import List, Literal, Union
