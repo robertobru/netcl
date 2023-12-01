@@ -30,7 +30,7 @@ async def get_switch(switch_name: str) -> Dict:
         switch = Switch.from_db(switch_name)
         if not switch:
             data = {'status': 'error', 'resource': 'switch',
-                'description': "Switch {} not found".format(switch_name)}
+                    'description': "Switch {} not found".format(switch_name)}
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=data)
         else:
             return switch.model_dump()

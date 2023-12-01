@@ -3,11 +3,11 @@ from switch import Switch
 from netdevice import Device
 from typing import List, Union, Tuple
 from utils import persistency, create_logger
-from models import WorkerMsg, NetVlanMsg, SwitchRequestVlanL3Port
+from models import WorkerMsg, NetVlanMsg, SwitchRequestVlanL3Port, PortToNetVlansMsg
 import queue
 import threading
 import traceback
-from typing import Literal, Any, Dict, Optional
+from typing import Dict
 
 _db = persistency.DB()
 logger = create_logger('network')
@@ -225,6 +225,37 @@ class Network:
         selected_switch.retrieve_info()
         return res
 
+    def modify_net_vlan(self, msg: NetVlanMsg):
+        if self.delete_net_vlan(msg):
+            return self.create_net_vlan(msg)
+        return False
+
+    def add_port_vlan(self, msg: PortToNetVlansMsg):
+        switch = next(item for item in self.switches if item.name == msg.switch)
+        port = next(item for item in switch.phy_ports if item.name == msg.port or item.index == msg.port)
+
+        vlan_to_configure = []
+        vlans_in_other_switches = []
+
+        for _v in msg.vids:
+            if _v not in port.trunk_vlans:
+                vlan_to_configure.append(_v)
+                for s in self.switches:
+                    if s.name != switch.name:
+                        if _v in s.vlans:
+                            logger.debug('vlan {} found also on switch {}'.format(_v, s.name))
+                            vlans_in_other_switches.append(_v)
+                            break
+
+
+
+
+    def del_port_vlan(self, msg: PortToNetVlansMsg):
+        pass
+
+    def mod_port_vlan(self, msg: PortToNetVlansMsg):
+        pass
+
     def get_switch_by_vrf(self, vrf_name):
         for s in self.switches:
             for v in s.vrfs:
@@ -279,20 +310,23 @@ class NetworkWorker:
                         self.net.delete_net_vlan(s_input)
                     case 'add_net_vlan':
                         self.net.create_net_vlan(s_input)
+                    case 'mod_net_vlan':
+                        self.net.modify_net_vlan(s_input)
+                    case 'add_port_vlan':
+                        self.net.add_port_vlan(s_input)
+                    case 'del_port_vlan':
+                        self.net.del_port_vlan(s_input)
+                    case 'mod_port_vlan':
+                        self.net.mod_port_vlan(s_input)
                     case _:
                         raise ValueError('msg operation not found')
-                # self.process_session(s_input.request_msg, s_input.operation)
                 s_input.update_status('Success')
             except Exception as e:
-                # s_input.error_detail = ' '.join(traceback.format_tb(e.__traceback__))
                 s_input.update_status('Failed')
                 logger.error(traceback.format_tb(e.__traceback__))
                 logger.error(str(e))
             finally:
                 self.queue.task_done()
-
-    def process_session(self, msg, operation):
-        pass
 
     def get_topology(self) -> Dict:
         return self.net.get_topology_dict()

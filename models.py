@@ -10,6 +10,21 @@ from utils import persistency
 
 
 _db = persistency.DB()
+NetWorkerOperationType = Literal[
+    'add_switch',
+    'del_switch',
+    'add_net_vlan',
+    'del_net_vlan',
+    'mod_net_vlan',
+    'add_port_vlan',
+    'del_port_vlan',
+    'mod_port_vlan'
+]
+NetWorkerOperationStates = Literal['InProgress', 'Failed', 'Success']
+LinkModes = Literal['ACCESS', 'TRUNK', 'HYBRID', 'NA']
+LinkStates = Literal['UP', 'DOWN', 'NA']
+LinkAdminStates = Literal['ENABLED', 'DISABLED', 'NA']
+SwitchStates = Literal["init", "reinit", "ready", "config_error", "auth_error", "net_error", "executing"]
 
 
 class PollingOperationLinks(BaseModel):
@@ -38,8 +53,8 @@ class RestAnswer202(BaseModel):
 
 class WorkerMsg(BaseModel):
     operation_id: str = Field(default_factory=lambda: str(uuid4()))
-    operation: Literal['add_switch', 'del_switch', 'add_net_vlan', 'del_net_vlan', 'mod_net_vlan']
-    status: Literal['InProgress', 'Failed', 'Success'] = 'InProgress'
+    operation: NetWorkerOperationType
+    status: NetWorkerOperationStates = 'InProgress'
     start_time: datetime = Field(default_factory=datetime.now)
     end_time: datetime = None
     # error_detail: Union[None, str] = str
@@ -101,6 +116,12 @@ class PortToNetVlans(CallbackRequest):
 
 class PortToNetVlansMsg(PortToNetVlans, WorkerMsg):
     pass
+
+
+class PortVlanReport(BaseModel):
+    trunk: List[int]
+    pvid: int
+    mode: str
 
 
 class SwitchRequestVlanL3Port(BaseModel):
@@ -165,12 +186,9 @@ class PhyPort(BaseModel):
     neighbor: Union[LldpNeighbor, None] = None
     speed: Union[int, None] = None
     duplex: str = 'NA'  # this should be converted in enum
-    mode: Literal['ACCESS', 'TRUNK', 'HYBRID', 'NA']  # this should be converted in enum
-    status: Literal['UP', 'DOWN', 'NA'] = 'NA'  # this should be converted in enum
-    admin_status: Literal['ENABLED', 'DISABLED', 'NA'] = 'NA'  # this should be converted in enum
-
-
-
+    mode: LinkModes
+    status: LinkStates = 'NA'
+    admin_status: LinkAdminStates = 'NA'
 
 
 class SwitchDataModel(Device):
@@ -180,4 +198,4 @@ class SwitchDataModel(Device):
     vlans: List[int] = []
     config_history: List[ConfigItem] = []
     last_config: Union[ConfigItem, None] = None
-    state: Literal["init", "reinit", "ready", "config_error", "auth_error", "net_error", "executing"] = "init"
+    state: SwitchStates = "init"
