@@ -387,7 +387,7 @@ class HpComware(Switch):
         :raises ValueError: If VRF name is empty or if VLAN interface IP or subnet mask is not set.
         """
 
-        netmask = ipaddress.IPv4Network(str(vlan_interface.cidr)).netmask
+        netmask = str(ipaddress.IPv4Network(str(vlan_interface.cidr)).netmask)
         # check conditions
         if not vrf.name:
             raise ValueError("VRF name cannot be empty!")

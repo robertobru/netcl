@@ -193,7 +193,7 @@ class Network:
                     break
         if selected_switch.state != 'ready':
             raise ValueError("switch {} is in {} status".format(selected_switch.name, selected_switch.state))
-        selected_switch.add_vlan_to_vrf(selected_vrf_name, VlanL3Port())
+        selected_switch.add_vlan_to_vrf(selected_vrf, VlanL3Port())
 
 
 
