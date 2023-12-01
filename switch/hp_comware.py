@@ -1,6 +1,6 @@
 from sbi.netmiko import NetmikoSbi
 from .switch_base import Switch
-from .switch_models import SwitchRequestVlanL3Port, LldpNeighbor, PhyPort, VlanL3Port, Vrf
+from models import SwitchRequestVlanL3Port, LldpNeighbor, PhyPort, VlanL3Port, Vrf
 import textfsm
 import ipaddress
 from pydantic import IPvAnyInterface

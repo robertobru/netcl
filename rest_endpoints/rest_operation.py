@@ -1,5 +1,5 @@
 from fastapi import APIRouter, status, HTTPException
-from rest_endpoints.rest_models import WorkerMsg
+from models import WorkerMsg
 from typing import List, Dict, Union
 from utils import persistency, create_logger
 from network import net_worker

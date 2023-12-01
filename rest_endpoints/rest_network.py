@@ -1,6 +1,5 @@
 from fastapi import APIRouter, status, HTTPException
-from rest_endpoints.rest_models import RestAnswer202 , NetworkVrf, NetVlan, PortToNetVlans, NetVlanMsg, \
-    PortToNetVlansMsg
+from models import NetVlanMsg, PortToNetVlansMsg, RestAnswer202, NetworkVrf, NetVlan, PortToNetVlans
 from typing import List, Dict, Union
 from utils import persistency, create_logger
 from network import net_worker
