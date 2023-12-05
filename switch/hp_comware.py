@@ -289,14 +289,14 @@ class HpComware(Switch):
                 raise ValueError("in ACCESS port there is only one vlan id!")
             else:
                 for _ in vlan_ids:
-                    commands_list.append([
+                    commands_list.extend([
                         f'interface {port.index}',
                         f'undo port access vlan'
                     ])
 
         elif port.mode in ["TRUNK", "HYBRID"]:
             for vlan_id in vlan_ids:
-                commands_list.append([
+                commands_list.extend([
                     f'interface {port.index}',
                     f'undo port {"trunk" if port.mode == "TRUNK" else "hybrid"} vlan {vlan_id}'
                 ])
@@ -403,7 +403,7 @@ class HpComware(Switch):
         add_vlan_interface_to_vpn_instance_cmd = [
             f'interface Vlan-interface {vlan_interface.vlan}',
             f'ip binding vpn-instance {vrf.name}',
-            f'ip address {vlan_interface.ipaddress} {netmask}'
+            f'ip address {str(ipaddress.IPv4Address(str(vlan_interface.ipaddress)))} {netmask}'
         ]
         # add vrf name to vlan_interface
         vlan_interface.vrf = vrf.name
