@@ -180,9 +180,9 @@ class HpComware(Switch):
         invalid_vlans_lst = list(filter(lambda vlan: not (1 <= vlan <= 4094), vlan_ids))
         if invalid_vlans_lst:
             raise ValueError("VLAN ID must be an integer between 1 and 4094 inclusive.")
-        else:
-            for vlan_id in vlan_ids:
-                vlan_create_cmd.append([f'vlan {vlan_id}', f'name vlan {vlan_id}', f'description vlan {vlan_id}'])
+
+        for vlan_id in vlan_ids:
+            vlan_create_cmd.append([f'vlan {vlan_id}', f'name vlan {vlan_id}', f'description vlan {vlan_id}'])
 
         # send commands to the swicth
         res = self._sbi_driver.send_command(commands=vlan_create_cmd, enable=True)
