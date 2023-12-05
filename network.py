@@ -3,7 +3,8 @@ from switch import Switch
 from netdevice import Device
 from typing import List, Union, Tuple
 from utils import persistency, create_logger
-from models import WorkerMsg, NetVlanMsg, SwitchRequestVlanL3Port, PortToNetVlansMsg
+from models import WorkerMsg, NetVlanMsg, SwitchRequestVlanL3Port, PortToNetVlansMsg, VlanTerminations, \
+     VlanInterfaceTermination  # VlanServerTermination,
 import queue
 import threading
 import traceback
@@ -25,6 +26,7 @@ class Network:
     switches: List[Switch] = []
     graph: nx.MultiGraph = None
     groups: dict[str, str] = {}
+    vlan_terminations: dict[int, VlanTerminations]
 
     def __init__(self):
         db_switches = _db.find_DB('switches', {})
@@ -36,7 +38,54 @@ class Network:
         if self.groups is None:
             logger.warning('no groups found on the database')
             self.groups = {}
+        self.vlan_terminations = dict()
         self.build_graph()
+        self.build_vlan_data()
+
+    def _get_vlan_interface_termination(self, switch: Switch, vid: int) -> None:
+        for _v_itf in switch.vlan_l3_ports:
+            # logger.debug("now on {}".format(_v_itf))
+            if vid == _v_itf.vlan:
+                logger.debug('found Vlan Interface for Vlan {} on switch {}'.format(vid, switch.name))
+                if vid not in self.vlan_terminations.keys():
+                    self.vlan_terminations[vid] = VlanTerminations()
+                if self.vlan_terminations[vid].vlan_interface:
+                    raise ValueError("multiple vlan interfaces found for vlan {}".format(vid))
+                self.vlan_terminations[vid].vlan_interface = VlanInterfaceTermination(
+                    name=_v_itf.index, switch_name=switch.name)
+
+    def _get_vlan_server_termination(self, _s: Switch, vid: int, managed_switch_names: List[str]) -> None:
+        for _port in _s.phy_ports:
+            if _port.status == 'UP' and _port.neighbor:
+                # check if the VLAN is used in trunk or access to connect servers
+                if (vid in _port.trunk_vlans and _port.mode in ['TRUNK', 'HYBRID']) or \
+                        (vid == _port.access_vlan and _port.mode in ['ACCESS', 'HYBRID']):
+                    if _port.neighbor.neighbor not in managed_switch_names:
+                        logger.debug('found Vlan {} termination on switch {} port {} towards server {}'
+                                     .format(vid, _s.name, _port.name, _port.neighbor.neighbor))
+                        if vid not in self.vlan_terminations.keys():
+                            self.vlan_terminations[vid] = VlanTerminations()
+
+                        if _s.name not in self.vlan_terminations[vid].server_ports.keys():
+                            self.vlan_terminations[vid].server_ports[_s.name] = [_port.name]
+                        else:
+                            self.vlan_terminations[vid].server_ports[_s.name].append(_port.name)
+
+    def build_vlan_data(self):
+        managed_switch_names = [item.name for item in self.switches]
+        for _s in self.switches:
+            for vid in _s.vlans:
+                self._get_vlan_interface_termination(_s, vid)
+                self._get_vlan_server_termination(_s, vid, managed_switch_names)
+                if vid in self.vlan_terminations.keys():
+                    self.vlan_terminations[vid].topology = self.get_vlan_overlay(vid, only_managed_nodes=True)
+        logger.info(self.vlan_terminations)
+        all_vlans = set()
+        for _s in self.switches:
+            all_vlans.update(_s.vlans)
+        logger.info("used vlans {}".format(set(self.vlan_terminations.keys())))
+        logger.info(" all vlans {}".format(all_vlans))
+        logger.info("configured but unused vlans {}".format(all_vlans - set(self.vlan_terminations.keys())))
 
     def onboard_switch(self, node: Device):
         new_switch = Switch.create(node)
@@ -103,29 +152,13 @@ class Network:
         else:
             return nx.convert.to_dict_of_dicts(self.graph)
 
-    def get_shortest_path(self, src_switch: str, dst_switch: str) -> List[Tuple[str, str, Dict]]:
-        try:
-            path = nx.shortest_path(self.graph, source=src_switch, target=dst_switch, weight='weight')
-            # checking if switches in the path are not in error state
-            for switch_name in path:
-                switch = next(item for item in self.switches if item.name == switch_name)
-                if switch.state in ['config_error', 'net_error', 'auth_error']:
-                    raise ValueError("switch {} is not available since it is in {}".format(switch.name, switch.state))
+    def get_backbone_topology(self) -> nx.MultiGraph:
+        # return the topology among managed switches
+        managed_switches = [item.name for item in self.switches]
+        return self.graph.subgraph(managed_switches)
 
-            # path contains a list of switch name to be crossed. Multiple links might exist between switches
-            selected_path = []
-            for (s, d) in path:
-                links = self.graph.edges[s][d]
-                selected_link = None
-                for e in links:
-                    if not selected_link or e[3]['weight'] < selected_link[3]['weight']:
-                        selected_link = e
-                selected_path.append(selected_link)
-            return selected_path
-        except Exception:
-            return []
-
-    def get_vlan_overlay(self, vlan_id: int) -> nx.MultiGraph:
+    def get_vlan_overlay(self, vlan_id: int, only_managed_nodes: bool = False) -> nx.MultiGraph:
+        managed_nodes = [item.name for item in self.switches]
         vlan_graph = nx.MultiGraph()
         for switch in self.switches:
             if vlan_id in switch.vlans:
@@ -134,8 +167,12 @@ class Network:
                 vlan_graph.add_node(switch.name, vlan_interface=vlan_interface, vlan_configured=True)
 
         for e in self.graph.edges(data=True):
-            if vlan_id in e[2]['vlans']:
-                vlan_graph.add_edge(e[0], e[1], **e[2])
+            if only_managed_nodes:
+                if e[0] in managed_nodes and e[1] in managed_nodes and vlan_id in e[2]['vlans']:
+                    vlan_graph.add_edge(e[0], e[1], ports=e[2]['ports'], weight=e[2]['weight'])
+            else:
+                if vlan_id in e[2]['vlans']:
+                    vlan_graph.add_edge(e[0], e[1], ports=e[2]['ports'], weight=e[2]['weight'])
         return vlan_graph
 
     def get_l3_overlay_topology(self, vrf_name: str) -> nx.MultiGraph:
@@ -205,6 +242,7 @@ class Network:
         return res
 
     def delete_net_vlan(self, msg: NetVlanMsg):
+        # Fixme: add control for avoiding deleting Vlan from proj VRF to the FW
         if msg.group not in self.groups.keys():
             raise ValueError('Group {} not existing'.format(msg.group))
         logger.info("group {} is mapped to VRF {}")
@@ -234,21 +272,59 @@ class Network:
         switch = next(item for item in self.switches if item.name == msg.switch)
         port = next(item for item in switch.phy_ports if item.name == msg.port or item.index == msg.port)
 
-        vlan_to_configure = []
-        vlans_in_other_switches = []
-
+        # configure the vlan in the trunk link in the msg
+        vlan_to_configure = dict()
         for _v in msg.vids:
             if _v not in port.trunk_vlans:
-                vlan_to_configure.append(_v)
-                for s in self.switches:
-                    if s.name != switch.name:
-                        if _v in s.vlans:
-                            logger.debug('vlan {} found also on switch {}'.format(_v, s.name))
-                            vlans_in_other_switches.append(_v)
-                            break
+                if switch.name not in vlan_to_configure.keys():
+                    vlan_to_configure[switch.name] = dict()
+                if port.index not in vlan_to_configure[switch.name].keys():
+                    vlan_to_configure[switch.name][port.index] = []
+                vlan_to_configure[switch.name][port.index].append(_v)
 
+        # check if vlan connectivity among switches should be provided
+        # backbone_vlans_to_add = []
+        for _v in msg.vids:
+            if _v not in self.vlan_terminations.keys() or not self.vlan_terminations[_v].topology:
+                logger.debug('vlan {} is a new overlay, no overlay modifications needed'.format(switch.name, _v))
+                continue
+            if switch.name not in List[self.vlan_terminations[_v].topology.nodes]:
+                logger.debug('switch {} joined vlan {} overlay, backbone connectivity has to be provided'
+                             .format(switch.name, _v))
+                backbone_graph = self.get_backbone_topology()
+                # Fixme: prune node leaves in the graph
+                for edge in backbone_graph.edges(data=True):
+                    if _v not in edge[2]['vlans']:
+                        src = edge[0]
+                        dst = edge[1]
+                        src_port = edge[2]['ports'][edge[0]]
+                        dst_port = edge[2]['ports'][edge[1]]
 
+                        if src not in vlan_to_configure.keys():
+                            vlan_to_configure[src] = dict()
+                            if src_port not in vlan_to_configure[src].keys():
+                                vlan_to_configure[src][src_port] = []
+                        if dst not in vlan_to_configure.keys():
+                            vlan_to_configure[dst] = dict()
+                            if dst_port not in vlan_to_configure[dst].keys():
+                                vlan_to_configure[dst][dst_port] = []
 
+                        vlan_to_configure[src][src_port].append(_v)
+                        vlan_to_configure[dst][dst_port].append(_v)
+            else:
+                logger.debug('switch {} already in the vlan {} overlay, no overlay modifications needed'.format(
+                    switch.name, _v))
+
+            logger.debug('vlan to be configured:\n {}'.format(vlan_to_configure))
+
+            for s_name in vlan_to_configure.keys():
+                _s = next(item for item in self.switches if item.name == s_name)
+                all_s_vlan = []
+                for _p in vlan_to_configure[s_name].keys():
+                    all_s_vlan += vlan_to_configure[s_name][_p]
+                _s.add_vlan(all_s_vlan)
+                for _p in vlan_to_configure[s_name].keys():
+                    _s.add_vlan_to_port(_v, _p)
 
     def del_port_vlan(self, msg: PortToNetVlansMsg):
         pass
@@ -292,6 +368,7 @@ class NetworkWorker:
         self.queue.put(worker_msg)
 
     def next_msg(self):
+        # Fixme: wait for switches to be ready
         while True:
             logger.info('network worker awaiting for new job')
             s_input = self.queue.get()
