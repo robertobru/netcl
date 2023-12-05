@@ -1,7 +1,8 @@
 from sbi.netmiko import NetmikoSbi
 from .switch_base import Switch
-from netdevice import Vrf, PhyPort, VlanL3Port, LldpNeighbor
+from models import SwitchRequestVlanL3Port, LldpNeighbor, PhyPort, VlanL3Port, Vrf
 import textfsm
+import ipaddress
 from pydantic import IPvAnyInterface
 from netaddr import IPAddress
 from utils import create_logger
@@ -375,7 +376,7 @@ class HpComware(Switch):
     def _unbind_vrf(self, vrf1: Vrf, vrf2: Vrf) -> bool:
         pass
 
-    def _add_vlan_to_vrf(self, vrf: Vrf, vlan_interface: VlanL3Port) -> bool:
+    def _add_vlan_to_vrf(self, vrf: Vrf, vlan_interface: SwitchRequestVlanL3Port) -> bool:
         """
         Creates a VLAN interface and associates it with a specified VRF (VPN instance).
 
@@ -384,10 +385,12 @@ class HpComware(Switch):
         :return: list[str] - List of commands to configure the VLAN and VRF association.
         :raises ValueError: If VRF name is empty or if VLAN interface IP or subnet mask is not set.
         """
+
+        netmask = str(ipaddress.IPv4Network(str(vlan_interface.cidr)).netmask)
         # check conditions
         if not vrf.name:
             raise ValueError("VRF name cannot be empty!")
-        if not vlan_interface.ipaddress or not vlan_interface.subnet_mask:
+        if not vlan_interface.ipaddress or not netmask:
             raise ValueError("The VLAN interface IP or subnet mask is not set!")
 
         # Ckeck and create vlan if not existed
@@ -400,7 +403,7 @@ class HpComware(Switch):
         add_vlan_interface_to_vpn_instance_cmd = [
             f'interface Vlan-interface {vlan_interface.vlan}',
             f'ip binding vpn-instance {vrf.name}',
-            f'ip address {vlan_interface.ipaddress} {vlan_interface.subnet_mask}'
+            f'ip address {vlan_interface.ipaddress} {netmask}'
         ]
         # add vrf name to vlan_interface
         vlan_interface.vrf = vrf.name

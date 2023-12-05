@@ -3,11 +3,11 @@ from switch import Switch
 from netdevice import Device
 from typing import List, Union, Tuple
 from utils import persistency, create_logger
-from rest_endpoints.rest_models import WorkerMsg
+from models import WorkerMsg, NetVlanMsg, SwitchRequestVlanL3Port, PortToNetVlansMsg
 import queue
 import threading
 import traceback
-from typing import Literal, Any, Dict, Optional
+from typing import Dict
 
 _db = persistency.DB()
 logger = create_logger('network')
@@ -24,12 +24,18 @@ def compare_graph_edges(e1_src: str, e1_dst: str, e1_data: Dict[str, str], e2_sr
 class Network:
     switches: List[Switch] = []
     graph: nx.MultiGraph = None
+    groups: dict[str, str] = {}
 
     def __init__(self):
         db_switches = _db.find_DB('switches', {})
         for sw in db_switches:
             self.switches.append(Switch.from_db(device_name=sw['name']))
         # FixMe: await for switches to exit from reinit state? in a separate thread?
+
+        self.groups = _db.findone_DB('groups', {})
+        if self.groups is None:
+            logger.warning('no groups found on the database')
+            self.groups = {}
         self.build_graph()
 
     def onboard_switch(self, node: Device):
@@ -40,9 +46,10 @@ class Network:
         self.switches.append(new_switch)
         self.build_graph()
 
-    def delete_switch(self, switch: Switch):
-        self.switches = [item for item in self.switches if item.name != switch.name]
-        switch.destroy()
+    def delete_switch(self, switch_name: str):
+        switch_to_destroy = next(item for item in self.switches if item.name == switch_name)
+        self.switches = [item for item in self.switches if item.name != switch_name]
+        switch_to_destroy.destroy()
         self.build_graph()
 
     def get_topology_link(self, node1: str, node2: str, port1: str, port2: str) -> Union[Tuple[str, str, Dict], None]:
@@ -160,10 +167,93 @@ class Network:
 
         return vrf_graph
 
-    def create_net_vlan(self, msg):
+    def find_available_vrf(self, group_name: str) -> str:
+        for s in self.switches:
+            for v in s.vrfs:
+                if v.name not in self.groups.values() and v.name[:4] == 'proj' and len(v.ports) < 2:
+                    logger.info("selected VRF {}".format(v.name))
+                    self.groups[group_name] = v.name
+                    return v.name
+        raise ValueError('no VRFs available')
+
+    def create_net_vlan(self, msg: NetVlanMsg):
+        # Vlan interfaces should be unique over all the network
+        for s in self.switches:
+            for vlan_itf in s.vlan_l3_ports:
+                if vlan_itf.vlan == msg.vid:
+                    logger.error("found already existing vlan interface in create_net_vlan")
+                    raise ValueError("Vlan interface for vlan id {} already existing into switch {}".format(
+                        msg.vid, s.name))
+        # check if it is a new group, in the case it will need a new vrf
+        if msg.group not in self.groups.keys():
+            logger.info("group {} is not mapped to any switch VRFs, trying to select an available VRF"
+                        .format(msg.group))
+            selected_vrf_name = self.find_available_vrf(msg.group)
+        else:
+            logger.info("group {} is mapped to VRF {}")
+            selected_vrf_name = self.groups[msg.group]
+        # selecting switch and vrf and then applying
+        selected_switch = self.get_switch_by_vrf(selected_vrf_name)
+        selected_vrf = next(item for item in selected_switch.vrfs if item.name == selected_vrf_name)
+        res = selected_switch.add_vlan_to_vrf(
+            selected_vrf, SwitchRequestVlanL3Port.from_netvlanmsg(msg, vrf_name=selected_vrf_name))
+        if res:
+            self.group_table_to_db()
+            selected_switch.retrieve_info()  # FixMe: put it in a thread?
+        else:
+            raise ValueError('create_net_vlan failed due to switch-level problems')
+        return res
+
+    def delete_net_vlan(self, msg: NetVlanMsg):
+        if msg.group not in self.groups.keys():
+            raise ValueError('Group {} not existing'.format(msg.group))
+        logger.info("group {} is mapped to VRF {}")
+
+        selected_vrf_name = self.groups[msg.group]
+        selected_switch = self.get_switch_by_vrf(selected_vrf_name)
+        res = selected_switch.del_vlan_to_vrf(selected_vrf_name, msg.vid)
+        if not res:
+            raise ValueError('delete_net_vlan failed due to switch-level problems')
+
+        # check if VRF is now empty
+        vrf = next(item for item in selected_switch.vrfs if item.name == selected_vrf_name)
+        if len(vrf.ports) < 3:  # Note: the switch info has not yet been updated
+            logger.info("group {} is empty (no vlan interfaces), freeing vrf {}".format(msg.group, selected_vrf_name))
+            self.groups.pop(msg.group)
+            self.group_table_to_db()
+        # the configuration is changed on the device, retrieve the new config from the switch
+        selected_switch.retrieve_info()
+        return res
+
+    def modify_net_vlan(self, msg: NetVlanMsg):
+        if self.delete_net_vlan(msg):
+            return self.create_net_vlan(msg)
+        return False
+
+    def add_port_vlan(self, msg: PortToNetVlansMsg):
+        switch = next(item for item in self.switches if item.name == msg.switch)
+        port = next(item for item in switch.phy_ports if item.name == msg.port or item.index == msg.port)
+
+        vlan_to_configure = []
+        vlans_in_other_switches = []
+
+        for _v in msg.vids:
+            if _v not in port.trunk_vlans:
+                vlan_to_configure.append(_v)
+                for s in self.switches:
+                    if s.name != switch.name:
+                        if _v in s.vlans:
+                            logger.debug('vlan {} found also on switch {}'.format(_v, s.name))
+                            vlans_in_other_switches.append(_v)
+                            break
+
+
+
+
+    def del_port_vlan(self, msg: PortToNetVlansMsg):
         pass
 
-    def delete_net_vlan(self, msg):
+    def mod_port_vlan(self, msg: PortToNetVlansMsg):
         pass
 
     def get_switch_by_vrf(self, vrf_name):
@@ -179,6 +269,9 @@ class Network:
                 if vlan_itf.vlan == vlan_id:
                     return s
         return None
+
+    def group_table_to_db(self):
+        pass
 
 
 class NetworkWorker:
@@ -212,24 +305,28 @@ class NetworkWorker:
                     case 'add_switch':
                         self.net.onboard_switch(Device.model_validate(s_input.model_dump()))
                     case 'del_switch':
-                        self.net.delete_switch(s_input.switch)
+                        self.net.delete_switch(s_input.switch_name)
                     case 'del_net_vlan':
                         self.net.delete_net_vlan(s_input)
                     case 'add_net_vlan':
                         self.net.create_net_vlan(s_input)
+                    case 'mod_net_vlan':
+                        self.net.modify_net_vlan(s_input)
+                    case 'add_port_vlan':
+                        self.net.add_port_vlan(s_input)
+                    case 'del_port_vlan':
+                        self.net.del_port_vlan(s_input)
+                    case 'mod_port_vlan':
+                        self.net.mod_port_vlan(s_input)
                     case _:
                         raise ValueError('msg operation not found')
-                # self.process_session(s_input.request_msg, s_input.operation)
+                s_input.update_status('Success')
             except Exception as e:
+                s_input.update_status('Failed')
                 logger.error(traceback.format_tb(e.__traceback__))
                 logger.error(str(e))
-            # if callback then send failure
-            #    pass
             finally:
                 self.queue.task_done()
-
-    def process_session(self, msg, operation):
-        pass
 
     def get_topology(self) -> Dict:
         return self.net.get_topology_dict()

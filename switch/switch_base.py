@@ -1,5 +1,6 @@
 from __future__ import annotations  # needed to annotate class methods returning instances
-from netdevice import Device, PhyPort, VlanL3Port, Vrf, ConfigItem, LldpNeighbor
+from netdevice import Device
+from models import SwitchRequestVlanL3Port, ConfigItem, LldpNeighbor, PhyPort, VlanL3Port, Vrf
 import abc
 import json
 from typing import List, Literal, Union
@@ -111,6 +112,9 @@ class Switch(SwitchDataModel):
 
     def to_device_model(self) -> Device:
         return Device.model_validate(self, from_attributes=True)
+
+    def check_status(self):
+        return True if self.state == 'ready' else False
 
     def store_config(self, cfg: str) -> bool:
         if not self.last_config or cfg != self.last_config.config:
@@ -303,15 +307,30 @@ class Switch(SwitchDataModel):
     def _unbind_vrf(self, vrf1: Vrf, vrf2: Vrf) -> bool:
         pass
 
-    def add_vlan_to_vrf(self, vrf_name: str, vlan_interface: VlanL3Port) -> bool:
-        pass
+    def add_vlan_to_vrf(self, vrf: Vrf, vlan_interface: SwitchRequestVlanL3Port) -> bool:
+        if not self.check_status():
+            raise ValueError("switch {} is in {} status".format(self.name, self.state))
+        if vrf.vid not in self.vlans:
+            logger.warn("vlan {} not configured on switch {}. Adding it.".format(vrf.vid, self.name))
+            self.add_vlan([vrf.vid])
+        return self._add_vlan_to_vrf(vrf, vlan_interface)
 
     @abc.abstractmethod
-    def _add_vlan_to_vrf(self, vrf: Vrf, vlan_interface: VlanL3Port) -> bool:
+    def _add_vlan_to_vrf(self, vrf: Vrf, vlan_interface: SwitchRequestVlanL3Port) -> bool:
         pass
 
-    def del_vlan_to_vrf(self, vrf_name: str, vlan_id: str) -> bool:
-        pass
+    def del_vlan_to_vrf(self, vrf_name: str, vlan_id: int) -> bool:
+        if not self.check_status():
+            raise ValueError("switch {} is in {} status".format(self.name, self.state))
+        vlan_interface = next((item for item in self.vlan_l3_ports if item.vlan == vlan_id), None)
+        if not vlan_interface:
+            raise ValueError('Vlan interface with vlan id {} non existing on switch {}'.format(
+                vlan_id, self.name))
+        selected_vrf = next(item for item in self.vrfs if item.name == vrf_name)
+        if vlan_interface.vrf != vrf_name:
+            raise ValueError('Vlan interface with vlan id {} is not associated to the vrf {} in switch {}'.format(
+                vlan_id, vrf_name, self.name))
+        return self._del_vlan_to_vrf(selected_vrf, vlan_interface)
 
     @abc.abstractmethod
     def _del_vlan_to_vrf(self, vrf: Vrf, vlan_interface: VlanL3Port) -> bool:

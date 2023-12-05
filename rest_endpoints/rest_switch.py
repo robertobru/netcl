@@ -1,6 +1,6 @@
 from fastapi import APIRouter, status, HTTPException
-from rest_endpoints.rest_models import SwitchMsg, DelSwitchMsg, RestAnswer202
-from switch import SwitchDataModel, Switch
+from models import SwitchMsg, DelSwitchMsg, RestAnswer202, SwitchDataModel
+from switch import Switch
 from typing import List, Dict, Literal
 from netdevice import Device
 from utils import persistency, create_logger
@@ -30,7 +30,7 @@ async def get_switch(switch_name: str) -> Dict:
         switch = Switch.from_db(switch_name)
         if not switch:
             data = {'status': 'error', 'resource': 'switch',
-                'description': "Switch {} not found".format(switch_name)}
+                    'description': "Switch {} not found".format(switch_name)}
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=data)
         else:
             return switch.model_dump()
@@ -58,7 +58,6 @@ async def get_switch_list() -> List[SwitchListItem]:
 async def onboard_switch(msg: Device) -> RestAnswer202:
     try:
         logger.info('received add switch msg: {}'.format(msg.model_dump()))
-        # print('????????', **msg.model_dump())
         worker_msg = SwitchMsg(**msg.model_dump(), operation='add_switch')
         net_worker.send_message(worker_msg)
         # reply with submitted code
