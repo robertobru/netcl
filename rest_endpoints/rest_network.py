@@ -74,11 +74,17 @@ async def get_vlan_topology(vlan_id: int) -> Dict:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=data)
 
 
-def check_vlan_exists(msg: NetVlan) -> None:
-    if net_worker.net.get_switch_by_vlan_interface(msg.vid):
-        data = {'status': 'error', 'resource': 'vlan',
-                'description': "vlan {} already existing".format(msg.vid)}
-        raise HTTPException(status_code=status.HTTP_406_NOT_ACCEPTABLE, detail=data)
+def check_vlan_exists(msg: NetVlan, not_: bool = False) -> None:
+    if not_:
+        if not net_worker.net.get_switch_by_vlan_interface(msg.vid):
+            data = {'status': 'error', 'resource': 'vlan',
+                    'description': "vlan {} not existing".format(msg.vid)}
+            raise HTTPException(status_code=status.HTTP_406_NOT_ACCEPTABLE, detail=data)
+    else:
+        if net_worker.net.get_switch_by_vlan_interface(msg.vid):
+            data = {'status': 'error', 'resource': 'vlan',
+                    'description': "vlan {} already existing".format(msg.vid)}
+            raise HTTPException(status_code=status.HTTP_406_NOT_ACCEPTABLE, detail=data)
 
 
 @net_api_router.post("/vlan", response_model=RestAnswer202, status_code=status.HTTP_202_ACCEPTED)

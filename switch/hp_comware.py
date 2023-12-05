@@ -403,7 +403,7 @@ class HpComware(Switch):
         add_vlan_interface_to_vpn_instance_cmd = [
             f'interface Vlan-interface {vlan_interface.vlan}',
             f'ip binding vpn-instance {vrf.name}',
-            f'ip address {str(ipaddress.IPv4Address(str(vlan_interface.ipaddress)))} {netmask}'
+            f'ip address {str(ipaddress.IPv4Interface(str(vlan_interface.ipaddress)).ip)} {netmask}'
         ]
         # add vrf name to vlan_interface
         vlan_interface.vrf = vrf.name
