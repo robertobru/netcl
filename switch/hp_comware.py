@@ -183,7 +183,7 @@ class HpComware(Switch):
             raise ValueError("VLAN ID must be an integer between 1 and 4094 inclusive.")
 
         for vlan_id in vlan_ids:
-            vlan_create_cmd.append([f'vlan {vlan_id}', f'name vlan {vlan_id}', f'description vlan {vlan_id}'])
+            vlan_create_cmd.extend([f'vlan {vlan_id}', f'name vlan {vlan_id}', f'description vlan {vlan_id}'])
 
         # send commands to the swicth
         res = self._sbi_driver.send_command(commands=vlan_create_cmd, enable=True)
@@ -205,7 +205,7 @@ class HpComware(Switch):
             raise ValueError("VLAN ID must be an integer between 1 and 4094 inclusive.")
         else:
             for vlan_id in vlan_ids:
-                vlan_delete_cmd.append([f'undo vlan {vlan_id}'])
+                vlan_delete_cmd.extend([f'undo vlan {vlan_id}'])
 
         # send commands to the swicth
         res = self._sbi_driver.send_command(commands=vlan_delete_cmd, enable=True)
