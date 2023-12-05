@@ -4,9 +4,11 @@ import json
 from datetime import datetime
 from typing import Literal, List, Union
 from uuid import uuid4
-from pydantic import BaseModel, Field, IPvAnyInterface, IPvAnyNetwork, AnyHttpUrl, model_validator
+from pydantic import BaseModel, Field, IPvAnyInterface, IPvAnyNetwork, IPvAnyAddress, AnyHttpUrl, model_validator, \
+    ConfigDict
 from netdevice import Device
 from utils import persistency
+import networkx as nx
 
 
 _db = persistency.DB()
@@ -78,7 +80,7 @@ class WorkerMsg(BaseModel):
             pass
 
 
-class SwitchMsg(Device, WorkerMsg):
+class SwitchMsg(WorkerMsg, Device):
     pass
 
 
@@ -89,7 +91,7 @@ class DelSwitchMsg(WorkerMsg):
 class NetVlan(CallbackRequest):
     vid: int
     cidr: IPvAnyNetwork
-    gateway: Union[IPvAnyInterface, None] = None
+    gateway: Union[IPvAnyAddress, None] = None
     group: str  # project
     description: Union[str, None] = None
 
@@ -98,11 +100,14 @@ class NetVlan(CallbackRequest):
         if self.gateway:
             gateway_ip = ipaddress.IPv4Address(str(self.gateway))
             cidr_net = ipaddress.IPv4Network(str(self.cidr))
+            if self.vid > 4000 or self.vid < 20:
+                raise ValueError('Vlan identifier out of range')
             if gateway_ip not in cidr_net:
                 raise ValueError('The gateway IP address does not match with the network CIDR')
+            return self
 
 
-class NetVlanMsg(NetVlan, WorkerMsg):
+class NetVlanMsg(WorkerMsg, NetVlan):
     pass
 
 
@@ -199,3 +204,17 @@ class SwitchDataModel(Device):
     config_history: List[ConfigItem] = []
     last_config: Union[ConfigItem, None] = None
     state: SwitchStates = "init"
+
+
+class VlanInterfaceTermination(BaseModel):
+    name: str
+    switch_name: str
+
+
+class VlanTerminations(BaseModel):
+    # Attention: This class should not be stored into mongo
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    vlan_interface: Union[VlanInterfaceTermination, None] = None
+    server_ports: dict[str, List[str]] = {}
+    topology: Union[nx.MultiGraph, None] = None

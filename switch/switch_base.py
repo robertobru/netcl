@@ -163,8 +163,21 @@ class Switch(SwitchDataModel):
             logger.warn('all the vlan are already configured')
             return True
         else:
+            logger.debug("adding vlans {}".format(vlan_to_add))
             return self._add_vlan(vlan_to_add)
 
+    def is_endpoint_for_vlan(self, vlan_id: int, managed_switches: List[str]) -> bool:
+        # this function applies check to assess if the current switch is really part of the vlan overlay network
+        # to this end, the switch is part if it has a vlan interface or if vlan is applied to any phy interface not
+        # neighbouring with managed switches
+        if vlan_id in [item.vlan for item in self.vlan_l3_ports]:
+            logger.debug("switch {} has a vlan interface for vlan {}".format(self.name, vlan_id))
+            return True
+        for p in self.phy_ports:
+            if vlan_id in p.trunk_vlans and p.neighbor.neighbor not in managed_switches:
+                logger.debug("switch {} has at least a port connecting servers with vlan {}".format(self.name, vlan_id))
+                return True
+        return False
     @abc.abstractmethod
     def _add_vlan(self, vlan_ids: List[int]):
         pass
@@ -310,9 +323,9 @@ class Switch(SwitchDataModel):
     def add_vlan_to_vrf(self, vrf: Vrf, vlan_interface: SwitchRequestVlanL3Port) -> bool:
         if not self.check_status():
             raise ValueError("switch {} is in {} status".format(self.name, self.state))
-        if vrf.vid not in self.vlans:
-            logger.warn("vlan {} not configured on switch {}. Adding it.".format(vrf.vid, self.name))
-            self.add_vlan([vrf.vid])
+        if vlan_interface.vlan not in self.vlans:
+            logger.warn("vlan {} not configured on switch {}. Adding it.".format(vlan_interface.vlan, self.name))
+            self.add_vlan([vlan_interface.vlan])
         return self._add_vlan_to_vrf(vrf, vlan_interface)
 
     @abc.abstractmethod
