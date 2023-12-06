@@ -367,7 +367,6 @@ class HpComware(Switch):
         [vrf2_conf_cmds.append(f"vpn-target {rd_exp} export-extcommunity ") for rd_exp in vrf2.rd_export]
 
         # configure vpn-target for vrf2 import-extcommunity
-
         [vrf2.rd_import.append(vrf1_rd) for vrf1_rd in vrf1.rd_export if vrf1_rd not in vrf2.rd_import]
         [vrf2_conf_cmds.append(f"vpn-target {rd_import} import-extcommunity") for rd_import in vrf2.rd_import]
 
@@ -377,7 +376,38 @@ class HpComware(Switch):
         return res
 
     def _unbind_vrf(self, vrf1: Vrf, vrf2: Vrf) -> bool:
-        pass
+        """
+        Unbinds two VRFs instances by configuring VPN targets for import of extcommunity attributes.
+
+        :param vrf1: VRF instance 1
+        :param vrf2: VRF instance 2
+        :return: None
+        """
+        # configure vpn-target for vrf1 import-extcommunity
+        if vrf1.rd == vrf2.rd:
+            raise ValueError("Two VRFs have the same RD !!!")
+        vrf1_conf_cmds = []
+        if vrf2.rd in vrf1.rd_import:
+            vrf1_conf_cmds.append(f'ip vpn-instance {vrf1.name}')
+            vrf1_conf_cmds.append(f"undo vpn-target {vrf2.rd} import-extcommunity")
+            vrf1.rd_import.remove(vrf2.rd)
+
+        # configure vpn-target for vrf2 export-extcommunity
+        vrf2_conf_cmds = []
+        if vrf1.rd in vrf2.rd_import:
+            vrf2_conf_cmds.append(f'ip vpn-instance {vrf2.name}')
+            vrf2_conf_cmds.append(f"undo vpn-target {vrf1.rd} import-extcommunity ")
+            vrf2.rd_import.remove(vrf1.rd)
+
+        commands_list = vrf1_conf_cmds + vrf2_conf_cmds
+        # Check for empty command list
+        if not commands_list:
+            print("No commands to execute. VRFs are already unbound.")
+            return True
+
+        res = self._sbi_driver.send_command(commands=commands_list, enable=True)
+        print(commands_list)
+        return res
 
     def _add_vlan_to_vrf(self, vrf: Vrf, vlan_interface: SwitchRequestVlanL3Port) -> bool:
         """
