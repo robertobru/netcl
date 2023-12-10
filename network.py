@@ -4,7 +4,7 @@ from netdevice import Device
 from typing import List, Union, Tuple
 from utils import persistency, create_logger
 from models import WorkerMsg, NetVlanMsg, SwitchRequestVlanL3Port, PortToNetVlansMsg, VlanTerminations, \
-     VlanInterfaceTermination  # VlanServerTermination,
+     VlanInterfaceTermination
 import queue
 import threading
 import traceback
@@ -30,15 +30,24 @@ class Network:
 
     def __init__(self):
         db_switches = _db.find_DB('switches', {})
+        threads = []
         for sw in db_switches:
-            self.switches.append(Switch.from_db(device_name=sw['name']))
-        # FixMe: await for switches to exit from reinit state? in a separate thread?
+            switch_obj, switch_thread = Switch.from_db(device_name=sw['name'])
+            self.switches.append(switch_obj)
+            threads.append(switch_thread)
 
-        self.groups = _db.findone_DB('groups', {})
-        if self.groups is None:
+
+        groups_data = _db.findone_DB('groups', {'type': 'groups'})
+        if groups_data is None:
             logger.warning('no groups found on the database')
             self.groups = {}
+        else:
+            self.groups = groups_data['groups']
         self.vlan_terminations = dict()
+
+        for t in threads:
+            t.join()
+            logger.info('init for switch thread {} terminated'.format(t.name))
         self.build_graph()
         self.build_vlan_data()
 
@@ -49,8 +58,8 @@ class Network:
                 logger.debug('found Vlan Interface for Vlan {} on switch {}'.format(vid, switch.name))
                 if vid not in self.vlan_terminations.keys():
                     self.vlan_terminations[vid] = VlanTerminations()
-                if self.vlan_terminations[vid].vlan_interface:
-                    raise ValueError("multiple vlan interfaces found for vlan {}".format(vid))
+                # if self.vlan_terminations[vid].vlan_interface:
+                #    raise ValueError("multiple vlan interfaces found for vlan {}".format(vid))
                 self.vlan_terminations[vid].vlan_interface = VlanInterfaceTermination(
                     name=_v_itf.index, switch_name=switch.name)
 
@@ -199,8 +208,8 @@ class Network:
                 existing_edge = next((e for e in vrf_graph.edges(data=True) if e[0] == edge[0] and e[1] == edge[1] and
                                       e[2]['ports'] == edge[2]['ports']), None)
                 if not existing_edge:
-                    vrf_graph.add_edge(edge[0], edge[1], ports=edge[2]['ports'],
-                                       vlans=set.intersection(set(vrf_vlans), set(edge[2]['vlans'])))
+                    vrf_graph.add_edge(edge[0], edge[1], ports=edge[2]['ports'], vlans=set.intersection(
+                        set(vrf_vlans), set(edge[2]['vlans']) if 'vlans' in edge[2] else set()))
 
         return vrf_graph
 
@@ -236,7 +245,7 @@ class Network:
             selected_vrf, SwitchRequestVlanL3Port.from_netvlanmsg(msg, vrf_name=selected_vrf_name))
         if res:
             self.group_table_to_db()
-            selected_switch.retrieve_info()  # FixMe: put it in a thread?
+            selected_switch.update_info()  # FixMe: put it in a thread?
         else:
             raise ValueError('create_net_vlan failed due to switch-level problems')
         return res
@@ -260,7 +269,7 @@ class Network:
             self.groups.pop(msg.group)
             self.group_table_to_db()
         # the configuration is changed on the device, retrieve the new config from the switch
-        selected_switch.retrieve_info()
+        selected_switch.update_info()
         return res
 
     def modify_net_vlan(self, msg: NetVlanMsg):
@@ -347,7 +356,8 @@ class Network:
         return None
 
     def group_table_to_db(self):
-        pass
+        _data = {'type': 'groups', 'groups': self.groups}
+        _db.update_DB(data=_data, table='groups', filter={'type': 'groups'})
 
 
 class NetworkWorker:

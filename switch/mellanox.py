@@ -21,14 +21,19 @@ class Mellanox(Switch):
         if not self._sbi_ssh_driver:
             self._sbi_ssh_driver = NetmikoSbi(self.to_device_model())
 
-    def retrieve_info(self):
+    def _retrieve_info(self):
         self.reinit_sbi_drivers()
         self.retrieve_vlans()
         self.retrieve_ports()
         self.retrieve_config()
         self.retrieve_neighbors()
 
-        print(self.model_dump())
+    def _update_info(self):
+        self.retrieve_vlans()
+        self.retrieve_ports()
+        self.retrieve_config()
+        self.retrieve_neighbors()
+        logger.info('retrieved all the information for switch {}'.format(self.name))
 
     def retrieve_config(self):
         _config = self._sbi_ssh_driver.get_info("show configuration", enable=True)

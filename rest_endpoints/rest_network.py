@@ -102,7 +102,7 @@ async def create_net_vlan(msg: NetVlan) -> RestAnswer202:
 @net_api_router.delete("/vlan", response_model=RestAnswer202, status_code=status.HTTP_202_ACCEPTED)
 async def del_net_vlan(msg: NetVlan) -> RestAnswer202:
     worker_msg = NetVlanMsg(**msg.model_dump(), operation='del_net_vlan')
-    check_vlan_exists(msg)
+    check_vlan_exists(msg, not_=True)
     try:
         net_worker.send_message(worker_msg)
         return worker_msg.produce_rest_answer_202()
@@ -131,7 +131,8 @@ async def get_net_vlan(vid: int) -> NetVlan:
                 'description': "vlan {} not existing".format(vid)}
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=data)
     try:
-        vlan_intf = next(item for item in switch.vlan_l3_ports if item.vlan == vid)
+        vlan_intf = next((item for item in switch.vlan_l3_ports if item.vlan == vid), None)
+        logger.warn(vlan_intf.model_dump())
         return NetVlan.model_validate({
             'vid': vid,
             'cidr': vlan_intf.cidr,

@@ -3,8 +3,8 @@ from .switch_base import Switch
 from models import SwitchRequestVlanL3Port, LldpNeighbor, PhyPort, VlanL3Port, Vrf
 import textfsm
 import ipaddress
-from pydantic import IPvAnyInterface
-from netaddr import IPAddress
+from pydantic import IPvAnyInterface, IPvAnyAddress
+from netaddr import IPAddress, IPNetwork
 from utils import create_logger
 from typing import List, Literal
 
@@ -18,9 +18,16 @@ class HpComware(Switch):
         if not self._sbi_driver:
             self._sbi_driver = NetmikoSbi(self.to_device_model())
 
-    def retrieve_info(self) -> None:
+    def _retrieve_info(self) -> None:
         logger.info('retrieving information for switch {}'.format(self.name))
         self.reinit_sbi_drivers()
+        self.retrieve_config()
+        self.parse_config()
+        self.retrieve_runtime_ports()
+        self.retrieve_neighbors()
+        logger.info('retrieved all the information for switch {}'.format(self.name))
+
+    def _update_info(self):
         self.retrieve_config()
         self.parse_config()
         self.retrieve_runtime_ports()
@@ -45,7 +52,6 @@ class HpComware(Switch):
         return interface
 
     def retrieve_runtime_ports(self) -> None:
-        logger.debug("retrieve_runtime_ports")
         ports = self._sbi_driver.get_info("display interface brief", use_textfsm=False)
         fsm = textfsm.TextFSM(open("fsm_templates/hp_comware_interface_template"))
         res = fsm.ParseText(ports)
@@ -79,14 +85,16 @@ class HpComware(Switch):
                 # interface
                 if r[0][:4] == 'Vlan':
                     if r[5] and r[6]:
-                        ipaddress = IPvAnyInterface("{}/{}".format(r[5], IPAddress(r[6]).netmask_bits()))
+                        ipaddress = IPvAnyAddress("{}".format(r[5]))
+                        cidr = IPvAnyInterface(IPNetwork("{}/{}".format(r[5], r[6])).cidr)
                     else:
                         ipaddress = None
-
+                        cidr = None
                     self.vlan_l3_ports.append(VlanL3Port(
                         index=r[0],
                         vlan=int(r[0][14:]),
                         ipaddress=ipaddress,
+                        cidr=cidr,
                         vrf=r[4],
                         description=r[7]
                     ))
@@ -162,11 +170,12 @@ class HpComware(Switch):
 
     def retrieve_neighbors(self) -> None:
         _neighbors = self._sbi_driver.get_info("display lldp neighbor-information list", use_textfsm=True)
-        logger.debug('neighbours: {}, Type {}'.format(_neighbors, type(_neighbors)))
 
         for n in _neighbors:
             interface = self._get_port_by_shortname(n['local_interface'])
             interface.neighbor = LldpNeighbor(neighbor=n['neighbor'], remote_interface=n['neighbor_interface'])
+            logger.debug('interface {} neighbours: {}, remote port {}'.format(interface.index, n['neighbor'],
+                                                                              n['neighbor_interface']))
 
     def _add_vlan(self, vlan_ids: List[int]):
         """

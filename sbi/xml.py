@@ -1,3 +1,4 @@
+import logging
 from typing import Literal, Union, List, Optional
 import requests
 import xmltodict
@@ -10,6 +11,7 @@ from switch.switch_base import SwitchNotConnectedException, SwitchNotAuthenticat
     SwitchConfigurationException
 
 logger = create_logger('xml_driver')
+logger.setLevel(logging.INFO)
 XmlNodeRequestType = Literal['get', 'action', 'set-create', 'set-delete', 'set-modify']
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 

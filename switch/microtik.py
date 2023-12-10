@@ -16,7 +16,7 @@ class Microtik(Switch):
         if not self._sbi_rest_driver:
             self._sbi_rest_driver = RosRestSbi(self.to_device_model())
 
-    def retrieve_info(self):
+    def _retrieve_info(self):
         self.reinit_sbi_drivers()
         self.retrieve_vlans()
         self.retrieve_ports()

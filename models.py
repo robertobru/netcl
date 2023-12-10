@@ -152,7 +152,8 @@ class VlanL3Port(BaseModel):
     index: str
     name: Union[str, None] = None
     vlan: int
-    ipaddress: Union[IPvAnyInterface, None] = None
+    ipaddress: Union[IPvAnyAddress, None] = None
+    cidr: Union[IPvAnyInterface, None] = None
     vrf: str = ''
     description: Union[str, None] = None
 

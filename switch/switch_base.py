@@ -3,7 +3,7 @@ from netdevice import Device
 from models import SwitchRequestVlanL3Port, ConfigItem, LldpNeighbor, PhyPort, VlanL3Port, Vrf
 import abc
 import json
-from typing import List, Literal, Union
+from typing import List, Literal, Union, Tuple
 import traceback
 from importlib import import_module
 from utils import persistency, create_logger
@@ -43,8 +43,30 @@ class SwitchDataModel(Device):
 
 class Switch(SwitchDataModel):
 
-    @abc.abstractmethod
     def retrieve_info(self):
+        self.vlan_l3_ports = []
+        self.phy_ports = []
+        self.vlans = []
+        self.vrfs = []
+        self._retrieve_info()
+        self.to_db()
+
+
+    @abc.abstractmethod
+    def _retrieve_info(self):
+        pass
+
+    def update_info(self):
+        logger.info('updating information for switch {}'.format(self.name))
+        self.vrfs = []
+        self.vlans = []
+        self.phy_ports = []
+        self.vlan_l3_ports = []
+
+        self._update_info()
+
+    @abc.abstractmethod
+    def _update_info(self):
         pass
 
     @classmethod
@@ -70,7 +92,7 @@ class Switch(SwitchDataModel):
         return switch
 
     @classmethod
-    def from_db(cls, device_name: str) -> Switch:
+    def from_db(cls, device_name: str) -> Tuple[Switch, Thread]:
         db_data = _db.findone_DB("switches", {'name': device_name})
         logger.debug("dbdata: {}".format(db_data))
         if not db_data:
@@ -90,10 +112,11 @@ class Switch(SwitchDataModel):
             switch_obj = getattr(import_module("switch.{}".format(switch_os['module'])), switch_os['class'])(**db_data)
             switch_obj.state = "reinit"
             switch_obj.to_db()
-            sbi_thread = Thread(target=switch_obj.reinit_sbi_drivers)
+            # sbi_thread = Thread(target=switch_obj.reinit_sbi_drivers)
+            sbi_thread = Thread(target=switch_obj.retrieve_info, name=switch_obj.name)
             sbi_thread.start()
             # switch_obj.reinit_sbi_drivers()
-            return switch_obj
+            return switch_obj, sbi_thread
         except Exception:
             logger.error(traceback.format_exc())
             raise ValueError('re-initialization for switch {} failed'.format(device_name))
@@ -118,7 +141,7 @@ class Switch(SwitchDataModel):
 
     def store_config(self, cfg: str) -> bool:
         if not self.last_config or cfg != self.last_config.config:
-            logger.info("switch {} changed its configuration. Updating data")
+            logger.info("switch {} changed its configuration. Updating data".format(self.name))
             self.last_config = ConfigItem(time=datetime.datetime.now(), config=cfg)
             self.config_history.append(self.last_config)
             if len(self.config_history) > 100:
@@ -178,6 +201,7 @@ class Switch(SwitchDataModel):
                 logger.debug("switch {} has at least a port connecting servers with vlan {}".format(self.name, vlan_id))
                 return True
         return False
+
     @abc.abstractmethod
     def _add_vlan(self, vlan_ids: List[int]):
         pass
@@ -203,8 +227,9 @@ class Switch(SwitchDataModel):
     def set_port_mode(self, port_name: str, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']):
         port = self.get_port_by_name(port_name)
         if port_mode == port.mode:
-            logger.warning("Port {} is already in {} mode".format(port_mode))
-        return self._set_port_mode()
+            logger.warning("Port {} is already in {} mode".format(port.index, port_mode))
+            return True
+        return self._set_port_mode(port, port_mode)
 
     @abc.abstractmethod
     def _set_port_mode(self, port: PhyPort, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']) -> bool:
@@ -227,7 +252,8 @@ class Switch(SwitchDataModel):
     def _add_vlan_to_port(self, vlan_id: int, port: PhyPort, pvid: bool = False) -> bool:
         pass
 
-    def del_vlan_to_port(self, vlan_ids: List[int], port_name: str, port_mode: Literal['ACCESS', 'TRUNK'] = 'TRUNK') -> bool:
+    def del_vlan_to_port(self, vlan_ids: List[int], port_name: str, port_mode: Literal['ACCESS', 'TRUNK'] = 'TRUNK') \
+            -> bool:
         port = self.get_port_by_name(port_name)
         if not port:
             return False
