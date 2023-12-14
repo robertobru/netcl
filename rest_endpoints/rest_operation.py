@@ -17,7 +17,7 @@ operation_router = APIRouter(
 
 
 @operation_router.get("/{}")
-async def get_vrf(operation_id: str) -> WorkerMsg:
+async def get_operation_status(operation_id: str) -> WorkerMsg:
     try:
         res = _db.findone_DB('operations', {'operation_id': operation_id})
         if not res:

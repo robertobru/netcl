@@ -58,7 +58,7 @@ class WorkerMsg(BaseModel):
     operation: NetWorkerOperationType
     status: NetWorkerOperationStates = 'InProgress'
     start_time: datetime = Field(default_factory=datetime.now)
-    end_time: datetime = None
+    end_time: Union[datetime, None] = None
     # error_detail: Union[None, str] = str
 
     def produce_rest_answer_202(self) -> RestAnswer202:
@@ -88,12 +88,17 @@ class DelSwitchMsg(WorkerMsg):
     switch_name: str
 
 
-class NetVlan(CallbackRequest):
+class NetVlanReport(BaseModel):
     vid: int
-    cidr: IPvAnyNetwork
+    cidr: Union[IPvAnyNetwork, None] = None
     gateway: Union[IPvAnyAddress, None] = None
     group: str  # project
     description: Union[str, None] = None
+
+
+class NetVlan(CallbackRequest, NetVlanReport):
+    cidr: IPvAnyNetwork
+    gateway: IPvAnyAddress
 
     @model_validator(mode='after')
     def _validate_gateway_ip(self):

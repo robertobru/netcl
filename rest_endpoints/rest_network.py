@@ -1,5 +1,6 @@
 from fastapi import APIRouter, status, HTTPException
-from models import NetVlanMsg, PortToNetVlansMsg, RestAnswer202, NetworkVrf, NetVlan, PortToNetVlans, PortVlanReport
+from models import NetVlanMsg, PortToNetVlansMsg, RestAnswer202, NetworkVrf, NetVlan, PortToNetVlans, PortVlanReport, \
+    NetVlanReport
 from typing import List, Dict, Union
 from utils import persistency, create_logger
 from network import net_worker
@@ -89,8 +90,14 @@ def check_vlan_exists(msg: NetVlan, not_: bool = False) -> None:
 
 @net_api_router.post("/vlan", response_model=RestAnswer202, status_code=status.HTTP_202_ACCEPTED)
 async def create_net_vlan(msg: NetVlan) -> RestAnswer202:
+    if not msg.cidr or not msg.gateway:
+        data = {'status': 'error', 'resource': 'vlan',
+                'description': "Cidr and gateway are mandatory field to creat a Net vlan {}".format(msg.vid)}
+        raise HTTPException(status_code=status.HTTP_406_NOT_ACCEPTABLE, detail=data)
+
     worker_msg = NetVlanMsg(**msg.model_dump(), operation='add_net_vlan')
     check_vlan_exists(msg)
+
     try:
         net_worker.send_message(worker_msg)
         return worker_msg.produce_rest_answer_202()
@@ -123,8 +130,8 @@ async def mod_net_vlan(msg: NetVlan) -> RestAnswer202:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@net_api_router.get("/vlan/{vid}", response_model=NetVlan, status_code=status.HTTP_200_OK)
-async def get_net_vlan(vid: int) -> NetVlan:
+@net_api_router.get("/vlan/{vid}", response_model=NetVlanReport, status_code=status.HTTP_200_OK)
+async def get_net_vlan(vid: int):
     switch = net_worker.net.get_switch_by_vlan_interface(vid)
     if not switch:
         data = {'status': 'error', 'resource': 'vlan',
@@ -133,7 +140,7 @@ async def get_net_vlan(vid: int) -> NetVlan:
     try:
         vlan_intf = next((item for item in switch.vlan_l3_ports if item.vlan == vid), None)
         logger.warn(vlan_intf.model_dump())
-        return NetVlan.model_validate({
+        return NetVlanReport.model_validate({
             'vid': vid,
             'cidr': vlan_intf.cidr,
             'gateway': vlan_intf.ipaddress,

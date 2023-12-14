@@ -374,7 +374,8 @@ class NetworkWorker:
         thread.start()
         logger.info("initialization complete")
 
-    def send_message(self, worker_msg):
+    def send_message(self, worker_msg: WorkerMsg):
+        worker_msg.to_db()
         self.queue.put(worker_msg)
 
     def next_msg(self):

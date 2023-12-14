@@ -28,7 +28,8 @@ class NetmikoSbi:
                 username=self.device.user,
                 password=self.device.passwd.get_secret_value(),
                 ip=str(self.device.address),
-
+                auth_timeout=90,
+                timeout=210
             )
         except netmiko.exceptions.NetmikoTimeoutException:
             logger.error('NetmikoTimeoutException in authentication')

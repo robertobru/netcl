@@ -235,9 +235,10 @@ class HpComware(Switch):
         if not (1 <= vlan_id <= 4094):
             raise ValueError("VLAN ID must be an integer between 1 and 4094 inclusive.")
 
+        set_port_type_and_vlan = []
         # check the mode of PhyPort
         if port.mode == "ACCESS":
-            port.trunk_vlans = [vlan_id]  # fixme: I think it must be empty list. Ask Roberto
+            port.trunk_vlans = []
             set_port_type_and_vlan = [
                 f'interface {port.index}',
                 'port link-type access',
@@ -457,7 +458,7 @@ class HpComware(Switch):
 
     def _del_vlan_to_vrf(self, vrf: Vrf, vlan_interface: VlanL3Port) -> bool:
         """
-        Deletes a VLAN interface from a specified VRF (VPN instance).
+        Deletes a VLAN interface and removes it from a specified VRF (VPN instance).
 
         :param vrf: Vrf - The VRF (VPN instance) to delete the VLAN-interface from.
         :param vlan_interface: VlanL3Port - Details of the VLAN interface to be added.
@@ -471,8 +472,9 @@ class HpComware(Switch):
 
         # Bind vlan-interface to the vrf
         command_list = [
-            f'interface Vlan-interface {vlan_interface.vlan}',
-            f'undo ip binding vpn-instance {vrf.name}',
+            # f'interface Vlan-interface {vlan_interface.vlan}',
+            # f'undo ip binding vpn-instance {vrf.name}',
+            f'undo interface Vlan-interface {vlan_interface.vlan}'
         ]
         # remove vrf name from vlan_interface
         vlan_interface.vrf = ""

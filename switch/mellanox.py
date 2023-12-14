@@ -1,14 +1,16 @@
 from sbi.xml import MlnxOsXgRequest, XmlRestSbi, create_multinode_request
 from .switch_base import Switch
 from models import LldpNeighbor, PhyPort, VlanL3Port, Vrf
-from pydantic import IPvAnyInterface
-from netaddr import IPAddress
+from pydantic import IPvAnyInterface, IPvAnyAddress
+from netaddr import IPAddress, IPNetwork
 from utils import create_logger
 from sbi.netmiko import NetmikoSbi
 from typing import List, Literal
 import textfsm
+import logging
 
 logger = create_logger('mlnx_os')
+logger.setLevel(logging.INFO)
 
 
 class Mellanox(Switch):
@@ -41,10 +43,10 @@ class Mellanox(Switch):
 
     def retrieve_neighbors(self):
         neighdata = self._sbi_ssh_driver.get_info("show lldp remote")
-        logger.info('{}'.format(neighdata))
+        logger.debug('{}'.format(neighdata))
         fsm = textfsm.TextFSM(open("fsm_templates/mlnx_lldp_template"))
         res = fsm.ParseText(neighdata)
-        logger.info(res)
+        logger.debug(res)
         for line in res:
             port = next(item for item in self.phy_ports if item.name == line[0])
             port.neighbor = LldpNeighbor(neighbor=line[3], remote_interface=line[2])
@@ -52,21 +54,21 @@ class Mellanox(Switch):
     def retrieve_vlans(self):
         vlans_request = self._sbi_xml_driver.post(
             MlnxOsXgRequest.create_single_node_request('/mlnxos/v1/vsr/vsr-default/vlans/*'))
-        logger.info(vlans_request.model_dump())
+        logger.debug(vlans_request.model_dump())
         self.vlans = [int(item.value) for item in vlans_request.actionResponse.nodes.node if item]
-        logger.info("VLANs defined: {}".format(self.vlans))
+        logger.debug("VLANs defined: {}".format(self.vlans))
 
     def retrieve_ports(self):
         ports = self._sbi_xml_driver.post(
             MlnxOsXgRequest.create_single_node_request('/mlnxos/v1/vsr/vsr-default/interfaces/*'))
-        logger.info(ports.model_dump())
+        logger.debug(ports.model_dump())
 
         port_indexes = [item.value for item in ports.actionResponse.nodes.node]
 
         port_data_request = create_multinode_request(
             '/mlnxos/v1/vsr/vsr-default/interfaces/{}/*', port_indexes)
         port_data_replies = self._sbi_xml_driver.multi_post(port_data_request)
-        logger.info(port_data_replies)
+        logger.debug(port_data_replies)
 
         port_map = {}
         for line in port_data_replies:
@@ -102,7 +104,7 @@ class Mellanox(Switch):
             elif name_split[7] == 'description':
                 port_map[port_index]['description'] = line.value
 
-        logger.info(port_map)
+        logger.debug(port_map)
         for k in port_map.keys():
             if port_map[k]['type'] in ['eth', 'splitter']:
                 port = PhyPort.model_validate(port_map[k])
@@ -121,9 +123,9 @@ class Mellanox(Switch):
         port_data = {}
         port_vlan_requests = create_multinode_request(
             '/mlnxos/v1/vsr/vsr-default/interfaces/{}/vlans/**', [port_index])
-        logger.info('port_vlan_requests {}'.format(port_vlan_requests))
+        logger.debug('port_vlan_requests {}'.format(port_vlan_requests))
         port_vlan_replies = self._sbi_xml_driver.multi_post(port_vlan_requests)
-        logger.info('port_vlan_replies {}'.format(port_vlan_replies))
+        logger.debug('port_vlan_replies {}'.format(port_vlan_replies))
         port_data['trunk_vlans'] = []
         port_data['access_vlan'] = None
         for vlan_line in port_vlan_replies:
@@ -140,9 +142,9 @@ class Mellanox(Switch):
         # ipv4/ip_address
         ip_port_vlan_requests = create_multinode_request(
             '/mlnxos/v1/vsr/vsr-default/interfaces/{}/ipv4/**', [port_index])
-        logger.info('ip_port_vlan_requests {}'.format(ip_port_vlan_requests))
+        logger.debug('ip_port_vlan_requests {}'.format(ip_port_vlan_requests))
         ip_port_vlan_replies = self._sbi_xml_driver.multi_post(ip_port_vlan_requests)
-        logger.info('ip_port_vlan_replies {}'.format(ip_port_vlan_replies))
+        logger.debug('ip_port_vlan_replies {}'.format(ip_port_vlan_replies))
         _ip_addr = {}
         for ip_line in ip_port_vlan_replies:
             if '/{}/ipv4/ip_address'.format(port_index) in ip_line.name:
@@ -151,8 +153,9 @@ class Mellanox(Switch):
             elif '/{}/ipv4/net_mask'.format(port_index) in ip_line.name:
                 _ip_addr['net_mask'] = ip_line.value
         if 'ip_address' in _ip_addr.keys() and 'net_mask' in _ip_addr.keys():
-            ip_str = "{}/{}".format(_ip_addr['ip_address'], IPAddress(_ip_addr['net_mask']).netmask_bits())
-            port_data['ipaddress'] = IPvAnyInterface(ip_str)
+            port_data['ipaddress'] = IPvAnyAddress(_ip_addr['ip_address'])
+            port_data['cidr'] = IPvAnyInterface(
+                IPNetwork("{}/{}".format(_ip_addr['ip_address'], IPAddress(_ip_addr['net_mask']).netmask_bits())).cidr)
         else:
             port_data['ipaddress'] = None
         logger.debug(port_data['ipaddress'])
@@ -162,10 +165,10 @@ class Mellanox(Switch):
     def _add_vlan(self, vlan_ids: List[int]) -> bool:
         node_template = '/mlnxos/v1/vsr/vsr-default/vlans/add|vlan_id={}'
         port_vlan_requests = create_multinode_request(node_template, vlan_ids, request_type='action')
-        logger.info('port_vlan_requests {}'.format(port_vlan_requests))
+        logger.debug('port_vlan_requests {}'.format(port_vlan_requests))
         try:
             port_vlan_replies = self._sbi_xml_driver.multi_post(port_vlan_requests)
-            logger.info('port_vlan_replies {}'.format(port_vlan_replies))
+            logger.debug('port_vlan_replies {}'.format(port_vlan_replies))
             self.vlans = self.vlans + vlan_ids
             return True
         except Exception:
@@ -175,10 +178,10 @@ class Mellanox(Switch):
     def _del_vlan(self, vlan_ids: List[int]) -> bool:
         node_template = '/mlnxos/v1/vsr/vsr-default/vlans/delete|vlan_id={}'
         port_vlan_requests = create_multinode_request(node_template, vlan_ids, request_type='action')
-        logger.info('port_vlan_requests {}'.format(port_vlan_requests))
+        logger.debug('port_vlan_requests {}'.format(port_vlan_requests))
         try:
             port_vlan_replies = self._sbi_xml_driver.multi_post(port_vlan_requests)
-            logger.info('port_vlan_replies {}'.format(port_vlan_replies))
+            logger.debug('port_vlan_replies {}'.format(port_vlan_replies))
             self.vlans = list(set(self.vlans) - set(vlan_ids))
             return True
         except Exception:
@@ -192,10 +195,10 @@ class Mellanox(Switch):
                     please consider to switch the mode to HYBRID')
             node_template = '/mlnxos/v1/vsr/vsr-default/interfaces/' + port.index + '/vlans/pvid={}'
             port_vlan_requests = create_multinode_request(node_template, [vlan_id], request_type='action')
-            logger.info('port_vlan_requests {}'.format(port_vlan_requests))
+            logger.debug('port_vlan_requests {}'.format(port_vlan_requests))
             try:
                 port_vlan_replies = self._sbi_xml_driver.multi_post(port_vlan_requests)
-                logger.info('port_vlan_replies {}'.format(port_vlan_replies))
+                logger.debug('port_vlan_replies {}'.format(port_vlan_replies))
                 port.access_vlan = vlan_id
                 return True
             except Exception:
@@ -207,10 +210,10 @@ class Mellanox(Switch):
                                     please consider to switch the mode to TRUNK/HYBRID')
             node_template = '/mlnxos/v1/vsr/vsr-default/interfaces/' + port.index + '/vlans/allowed/add|vlan_ids={}'
             port_vlan_requests = create_multinode_request(node_template, [vlan_id], request_type='action')
-            logger.info('port_vlan_requests {}'.format(port_vlan_requests))
+            logger.debug('port_vlan_requests {}'.format(port_vlan_requests))
             try:
                 port_vlan_replies = self._sbi_xml_driver.multi_post(port_vlan_requests)
-                logger.info('port_vlan_replies {}'.format(port_vlan_replies))
+                logger.debug('port_vlan_replies {}'.format(port_vlan_replies))
                 port.trunk_vlans.append(vlan_id)
                 return True
             except Exception:
@@ -225,10 +228,10 @@ class Mellanox(Switch):
         for vid in vlan_ids:
             node_template = node_template + "|vlan_ids={}".format(vid)
         port_vlan_requests = create_multinode_request(node_template, [port.index], request_type='action')
-        logger.info('port_vlan_requests {}'.format(port_vlan_requests))
+        logger.debug('port_vlan_requests {}'.format(port_vlan_requests))
         try:
             port_vlan_replies = self._sbi_xml_driver.multi_post(port_vlan_requests)
-            logger.info('port_vlan_replies {}'.format(port_vlan_replies))
+            logger.debug('port_vlan_replies {}'.format(port_vlan_replies))
             port.trunk_vlans = list(set(port.trunk_vlans) - set(vlan_ids))
             return True
         except Exception:
@@ -238,10 +241,10 @@ class Mellanox(Switch):
     def _set_port_mode(self, port: PhyPort, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']) -> bool:
         node_template = '/mlnxos/v1/vsr/vsr-default/interfaces/{}' + '/vlans/mode={}'.format(port_mode.lower())
         port_vlan_requests = create_multinode_request(node_template, [port.index], request_type='action')
-        logger.info('port_vlan_requests {}'.format(port_vlan_requests))
+        logger.debug('port_vlan_requests {}'.format(port_vlan_requests))
         try:
             port_vlan_replies = self._sbi_xml_driver.multi_post(port_vlan_requests)
-            logger.info('port_vlan_replies {}'.format(port_vlan_replies))
+            logger.debug('port_vlan_replies {}'.format(port_vlan_replies))
             port.mode = port_mode
             return True
         except Exception:
