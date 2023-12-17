@@ -41,6 +41,11 @@ class Mellanox(Switch):
         _config = self._sbi_ssh_driver.get_info("show configuration", enable=True)
         self.store_config(_config[6:])
 
+    def _check_config_changed(self, cfg) -> bool:
+        new_cfg = ''.join(cfg.splitlines(keepends=True)[2:])
+        last_cfg = ''.join(self.last_config.config.splitlines(keepends=True)[2:])
+        return new_cfg != last_cfg
+
     def retrieve_neighbors(self):
         neighdata = self._sbi_ssh_driver.get_info("show lldp remote")
         logger.debug('{}'.format(neighdata))
@@ -237,6 +242,9 @@ class Mellanox(Switch):
         except Exception:
             logger.error('problems in adding tagged vlan on Port {}'.format(port.name))
             return False
+
+    def _del_vlan_itf(self, vlan_id: int):
+        pass
 
     def _set_port_mode(self, port: PhyPort, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']) -> bool:
         node_template = '/mlnxos/v1/vsr/vsr-default/interfaces/{}' + '/vlans/mode={}'.format(port_mode.lower())

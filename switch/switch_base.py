@@ -139,8 +139,12 @@ class Switch(SwitchDataModel):
     def check_status(self):
         return True if self.state == 'ready' else False
 
+    @abc.abstractmethod
+    def _check_config_changed(self, cfg) -> bool:
+        pass
+
     def store_config(self, cfg: str) -> bool:
-        if not self.last_config or cfg != self.last_config.config:
+        if not self.last_config or self._check_config_changed(cfg):
             logger.info("switch {} changed its configuration. Updating data".format(self.name))
             self.last_config = ConfigItem(time=datetime.datetime.now(), config=cfg)
             self.config_history.append(self.last_config)
@@ -219,6 +223,22 @@ class Switch(SwitchDataModel):
 
     @abc.abstractmethod
     def _del_vlan(self, vlan_ids: List[int]):
+        pass
+
+    def del_vlan_itf(self, vlan_id: int):
+        """
+        Delete vlans interface from the switch
+        :param vlan_id: int
+        :return: list of the text commands as a separate list to delete vlan interface
+        """
+
+        intf = next((item for item in self.vlan_l3_ports if item.vlan == vlan_id), None)
+        if intf is None:
+            raise ValueError('no vlan interface for vlan id {}'.format(vlan_id))
+        return self._del_vlan_itf(vlan_id)
+
+    @abc.abstractmethod
+    def _del_vlan_itf(self, vlan_id: int):
         pass
 
     def get_vlans(self) -> List[int]:

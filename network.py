@@ -258,7 +258,8 @@ class Network:
 
         selected_vrf_name = self.groups[msg.group]
         selected_switch = self.get_switch_by_vrf(selected_vrf_name)
-        res = selected_switch.del_vlan_to_vrf(selected_vrf_name, msg.vid)
+        # res = selected_switch.del_vlan_to_vrf(selected_vrf_name, msg.vid)
+        res = selected_switch.del_vlan_itf(msg.vid)
         if not res:
             raise ValueError('delete_net_vlan failed due to switch-level problems')
 
@@ -348,7 +349,7 @@ class Network:
                     return s
         return None
 
-    def get_switch_by_vlan_interface(self, vlan_id):
+    def get_switch_by_vlan_interface(self, vlan_id: int):
         for s in self.switches:
             for vlan_itf in s.vlan_l3_ports:
                 if vlan_itf.vlan == vlan_id:
@@ -357,7 +358,10 @@ class Network:
 
     def group_table_to_db(self):
         _data = {'type': 'groups', 'groups': self.groups}
-        _db.update_DB(data=_data, table='groups', filter={'type': 'groups'})
+        if _db.exists_DB("groups", {'type': 'groups'}):
+            _db.update_DB('groups', data=_data, filter={'type': 'groups'})
+        else:
+            _db.insert_DB('groups', data=_data)
 
 
 class NetworkWorker:

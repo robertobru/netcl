@@ -34,6 +34,9 @@ class HpComware(Switch):
         self.retrieve_neighbors()
         logger.info('retrieved all the information for switch {}'.format(self.name))
 
+    def _check_config_changed(self, cfg) -> bool:
+        return cfg != self.last_config.config
+
     def _get_port_by_shortname(self, shortname: str) -> PhyPort:
         interface = None
         if shortname[:2] == 'GE':
@@ -198,6 +201,24 @@ class HpComware(Switch):
         res = self._sbi_driver.send_command(commands=vlan_create_cmd, enable=True)
 
         return res
+
+    def _del_vlan_itf(self, vlan_id: int):
+        """
+        Delete vlans interface from the hp-comware switch
+        :param vlan_id: int
+        :return: list of the text commands as a separate list to delete vlan interface
+        """
+
+        intf = next((item for item in self.vlan_l3_ports if item.vlan == vlan_id), None)
+        if intf is None:
+            raise ValueError('no vlan interface for vlan id {}'.format(vlan_id))
+
+        vlan_delete_cmd = ["undo interface Vlan-interface {}".format(vlan_id)]
+
+        # send commands to the swicth
+        res = self._sbi_driver.send_command(commands=vlan_delete_cmd, enable=True)
+        return res
+
 
     def _del_vlan(self, vlan_ids: List[int]):
         """
