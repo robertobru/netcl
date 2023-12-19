@@ -1,10 +1,10 @@
 import networkx as nx
 from switch import Switch
 from netdevice import Device
-from typing import List, Union, Tuple
+from typing import List, Union, Tuple, Literal
 from utils import persistency, create_logger
 from models import WorkerMsg, NetVlanMsg, SwitchRequestVlanL3Port, PortToNetVlansMsg, VlanTerminations, \
-     VlanInterfaceTermination
+     VlanInterfaceTermination, PhyPort
 import queue
 import threading
 import traceback
@@ -36,7 +36,6 @@ class Network:
             self.switches.append(switch_obj)
             threads.append(switch_thread)
 
-
         groups_data = _db.findone_DB('groups', {'type': 'groups'})
         if groups_data is None:
             logger.warning('no groups found on the database')
@@ -51,7 +50,9 @@ class Network:
         self.build_graph()
         self.build_vlan_data()
 
-    def _get_vlan_interface_termination(self, switch: Switch, vid: int) -> None:
+    # ##################### Vlan Termination Methos ##########################################
+
+    def _set_vlan_interface_termination(self, switch: Switch, vid: int) -> None:
         for _v_itf in switch.vlan_l3_ports:
             # logger.debug("now on {}".format(_v_itf))
             if vid == _v_itf.vlan:
@@ -63,7 +64,7 @@ class Network:
                 self.vlan_terminations[vid].vlan_interface = VlanInterfaceTermination(
                     name=_v_itf.index, switch_name=switch.name)
 
-    def _get_vlan_server_termination(self, _s: Switch, vid: int, managed_switch_names: List[str]) -> None:
+    def _set_vlan_server_termination(self, _s: Switch, vid: int, managed_switch_names: List[str]) -> None:
         for _port in _s.phy_ports:
             if _port.status == 'UP' and _port.neighbor:
                 # check if the VLAN is used in trunk or access to connect servers
@@ -80,12 +81,58 @@ class Network:
                         else:
                             self.vlan_terminations[vid].server_ports[_s.name].append(_port.name)
 
+    def _add_vlan_server_termination(self, _s: Switch, _p: PhyPort, vid: int) -> None:
+        if vid not in self.vlan_terminations.keys():
+            self.vlan_terminations[vid] = VlanTerminations()
+        if _s.name not in self.vlan_terminations[vid].keys():
+            self.vlan_terminations[vid].server_ports[_s.name] = [_p.name]
+        if _p.name not in self.vlan_terminations[vid].server_ports[_s.name]:
+            self.vlan_terminations[vid].server_ports[_s.name].append(_p.name)
+
+    def _del_vlan_server_termination(self, _s: Switch, _p: PhyPort, vid: int):
+        if _p.name in self.vlan_terminations[vid].server_ports[_s.name]:
+            self.vlan_terminations[vid].server_ports[_s.name].remove(_p.name)
+        if len(self.vlan_terminations[vid].server_ports[_s.name]) == 0:
+            self.vlan_terminations[vid].server_ports.pop(_s.name)
+        if len(self.vlan_terminations[vid].server_ports.keys()) == 0 and not self.vlan_terminations[vid].vlan_interface:
+            self.vlan_terminations.pop(vid)
+
+    def vlan_check_backbone_needed(
+            self,
+            vid: int,
+            switch_name: str = None,
+            operation: Literal['add', 'del', 'as_is'] = 'as_is'
+    ) -> bool:
+
+        if vid not in self.vlan_terminations.keys():
+            return False
+        switch_names = self.vlan_terminations[vid].get_sitch_names()
+        if operation == 'add':
+            return len(switch_names.union(set(switch_name))) > 1
+        elif operation == 'del':
+            return len(switch_names.difference(set(switch_name))) < 1
+        else:  # operation ==  as_is
+            return len(switch_names) > 1
+
+    def vlan_check_backbone_connectivity(self, vlan_id: int) -> Tuple[List[Tuple], bool]:
+        backbone = self.get_backbone_topology()
+        link_missing = []
+        for edge in backbone.edges(data=True):
+            if vlan_id not in edge[2]['vlans']:
+                link_missing.append(edge)
+        return link_missing, len(link_missing) > 0
+
+    def from_topology_link_to_switch_port(self, edge: Tuple) -> Tuple[Switch, PhyPort]:
+        switch = next(item for item in self.switches if item.name == edge[0])
+        port = next(item for item in switch.phy_ports if item.name == edge[2][switch.name])
+        return switch, port
+
     def build_vlan_data(self):
         managed_switch_names = [item.name for item in self.switches]
         for _s in self.switches:
             for vid in _s.vlans:
-                self._get_vlan_interface_termination(_s, vid)
-                self._get_vlan_server_termination(_s, vid, managed_switch_names)
+                self._set_vlan_interface_termination(_s, vid)
+                self._set_vlan_server_termination(_s, vid, managed_switch_names)
                 if vid in self.vlan_terminations.keys():
                     self.vlan_terminations[vid].topology = self.get_vlan_overlay(vid, only_managed_nodes=True)
         logger.info(self.vlan_terminations)
@@ -95,6 +142,8 @@ class Network:
         logger.info("used vlans {}".format(set(self.vlan_terminations.keys())))
         logger.info(" all vlans {}".format(all_vlans))
         logger.info("configured but unused vlans {}".format(all_vlans - set(self.vlan_terminations.keys())))
+
+    # ########################################################################################################
 
     def onboard_switch(self, node: Device):
         new_switch = Switch.create(node)
@@ -251,7 +300,8 @@ class Network:
         return res
 
     def delete_net_vlan(self, msg: NetVlanMsg):
-        # Fixme: add control for avoiding deleting Vlan from proj VRF to the FW
+        if 4000 < msg.vid < 4020:
+            raise ValueError('Vlan id {} is reserved for firewall connectivity')
         if msg.group not in self.groups.keys():
             raise ValueError('Group {} not existing'.format(msg.group))
         logger.info("group {} is mapped to VRF {}")
@@ -260,8 +310,6 @@ class Network:
         selected_switch = self.get_switch_by_vrf(selected_vrf_name)
         # res = selected_switch.del_vlan_to_vrf(selected_vrf_name, msg.vid)
         res = selected_switch.del_vlan_itf(msg.vid)
-        if not res:
-            raise ValueError('delete_net_vlan failed due to switch-level problems')
 
         # check if VRF is now empty
         vrf = next(item for item in selected_switch.vrfs if item.name == selected_vrf_name)
@@ -278,66 +326,83 @@ class Network:
             return self.create_net_vlan(msg)
         return False
 
-    def add_port_vlan(self, msg: PortToNetVlansMsg):
+    def _get_port_switch_objs(self, msg: PortToNetVlansMsg) -> Tuple[Switch, PhyPort]:
         switch = next(item for item in self.switches if item.name == msg.switch)
         port = next(item for item in switch.phy_ports if item.name == msg.port or item.index == msg.port)
+        return switch, port
 
-        # configure the vlan in the trunk link in the msg
-        vlan_to_configure = dict()
-        for _v in msg.vids:
-            if _v not in port.trunk_vlans:
-                if switch.name not in vlan_to_configure.keys():
-                    vlan_to_configure[switch.name] = dict()
-                if port.index not in vlan_to_configure[switch.name].keys():
-                    vlan_to_configure[switch.name][port.index] = []
-                vlan_to_configure[switch.name][port.index].append(_v)
+    def add_port_vlan(self, msg: PortToNetVlansMsg):
+        # note: this methods add incrementally trunk vlans on the specified port. Already exhisting Vlans will be
+        # mantained.
+
+        switch, port = self._get_port_switch_objs(msg)
+        if len(msg.vids) < 1:
+            raise ValueError("no vlan ids in message add_port")
+        # check and apply link mode
+        if port.mode != 'TRUNK':
+            logger.warning("[{}] port {} of switch {} in {} mode. Setting TRUNK mode".format(
+                msg.operation_id, port.name, switch.name, port.mode))
+            switch.set_port_mode(port.name, 'TRUNK')
+        # create vlan on the switch
+        missing_vlan_on_switch = [item for item in msg.vids if item not in switch.vlans]
+        if len(missing_vlan_on_switch) > 0:
+            logger.info("[{}] Adding VLANs {} to switch {}".format(
+                msg.operation_id, missing_vlan_on_switch, switch.name))
+            switch.add_vlan(missing_vlan_on_switch)
+
+        logger.info("[{}] Setting TRUNK VLANs {} on port {} of switch {}".format(
+            msg.operation_id, msg.vids, port.name, switch.name
+        ))
+        for vlan_id in msg.vids:
+            if vlan_id not in port.trunk_vlans:
+                switch.add_vlan_to_port(vlan_id, port.name)
+            else:
+                logger.warning("[{}] VLAN {} already present in port {} of switch {}".format(
+                    msg.operation_id, vlan_id, port.name, switch.name))
 
         # check if vlan connectivity among switches should be provided
-        # backbone_vlans_to_add = []
-        for _v in msg.vids:
-            if _v not in self.vlan_terminations.keys() or not self.vlan_terminations[_v].topology:
-                logger.debug('vlan {} is a new overlay, no overlay modifications needed'.format(switch.name, _v))
-                continue
-            if switch.name not in List[self.vlan_terminations[_v].topology.nodes]:
-                logger.debug('switch {} joined vlan {} overlay, backbone connectivity has to be provided'
-                             .format(switch.name, _v))
-                backbone_graph = self.get_backbone_topology()
-                # Fixme: prune node leaves in the graph
-                for edge in backbone_graph.edges(data=True):
-                    if _v not in edge[2]['vlans']:
-                        src = edge[0]
-                        dst = edge[1]
-                        src_port = edge[2]['ports'][edge[0]]
-                        dst_port = edge[2]['ports'][edge[1]]
-
-                        if src not in vlan_to_configure.keys():
-                            vlan_to_configure[src] = dict()
-                            if src_port not in vlan_to_configure[src].keys():
-                                vlan_to_configure[src][src_port] = []
-                        if dst not in vlan_to_configure.keys():
-                            vlan_to_configure[dst] = dict()
-                            if dst_port not in vlan_to_configure[dst].keys():
-                                vlan_to_configure[dst][dst_port] = []
-
-                        vlan_to_configure[src][src_port].append(_v)
-                        vlan_to_configure[dst][dst_port].append(_v)
-            else:
-                logger.debug('switch {} already in the vlan {} overlay, no overlay modifications needed'.format(
-                    switch.name, _v))
-
-            logger.debug('vlan to be configured:\n {}'.format(vlan_to_configure))
-
-            for s_name in vlan_to_configure.keys():
-                _s = next(item for item in self.switches if item.name == s_name)
-                all_s_vlan = []
-                for _p in vlan_to_configure[s_name].keys():
-                    all_s_vlan += vlan_to_configure[s_name][_p]
-                _s.add_vlan(all_s_vlan)
-                for _p in vlan_to_configure[s_name].keys():
-                    _s.add_vlan_to_port(_v, _p)
+        for vlan_id in msg.vids:
+            if self.vlan_check_backbone_needed(vlan_id, switch.name, operation='add'):
+                logger.info("[{}] backbone connectivity needed for VLAN {}".format(msg.operation_id, vlan_id))
+                unconfigured_links, need_change = self.vlan_check_backbone_connectivity(vlan_id)
+                if need_change:
+                    for edge in unconfigured_links:
+                        logger.info("[{}] adding VLAN {} to backbone link {}".format(msg.operation_id, vlan_id, edge))
+                        backbone_switch, backbone_port = self.from_topology_link_to_switch_port(edge)
+                        backbone_switch.add_vlan_to_port(vlan_id, backbone_port.name)
 
     def del_port_vlan(self, msg: PortToNetVlansMsg):
-        pass
+        # note: this methods delete incrementally trunk vlans on the specified port. Other Vlans will be mantained.
+
+        switch, port = self._get_port_switch_objs(msg)
+        if len(msg.vids) < 1:
+            raise ValueError("no vlan ids in message add_port")
+
+        logger.info("[{}] deleting TRUNK VLANs {} on port {} of switch {}".format(
+            msg.operation_id, msg.vids, port.name, switch.name
+        ))
+        vlans_to_be_removed_from_trunk = [item for item in msg.vids if item in port.trunk_vlans]
+        switch.del_vlan_to_port(vlans_to_be_removed_from_trunk, port.name)
+
+        # check if vlan connectivity among switches should be removed
+        for vlan_id in msg.vids:
+            # is the port the only termination of this vlan in this switch?
+            if len(self.vlan_terminations[vlan_id].server_ports[switch.name]) > 1:
+                # no backbone modifications are needed, because the switch should be mantained in the Vlan
+                continue
+            else:
+                # the vlan has no further termination in the switch, testing if backbone connectivity should be removed
+                if not self.vlan_check_backbone_needed(vlan_id, switch.name, operation='del'):
+                    logger.info("[{}] backbone connectivity not needed anymore for VLAN {}".format(
+                        msg.operation_id, vlan_id))
+                    backbone = self.get_backbone_topology()
+                    for edge in backbone.edges(data=True):
+                        bb_switch, bb_port = self.from_topology_link_to_switch_port(edge)
+                        bb_switch.del_vlan_to_port([vlan_id], port.name)
+                        if len(self.vlan_terminations[vlan_id].server_ports[bb_switch.name]) < 1 and \
+                                self.vlan_terminations[vlan_id].vlan_interface and \
+                                self.vlan_terminations[vlan_id].vlan_interface.switch_name != bb_switch.name:
+                            bb_switch.del_vlan([vlan_id])
 
     def mod_port_vlan(self, msg: PortToNetVlansMsg):
         pass

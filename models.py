@@ -224,3 +224,11 @@ class VlanTerminations(BaseModel):
     vlan_interface: Union[VlanInterfaceTermination, None] = None
     server_ports: dict[str, List[str]] = {}
     topology: Union[nx.MultiGraph, None] = None
+
+    def get_switch_names(self) -> set:
+        res = set()
+        if self.vlan_interface:
+            res.add(self.vlan_interface.switch_name)
+        for p in self.server_ports.keys():
+            res.add(self.server_ports[p])
+        return res
