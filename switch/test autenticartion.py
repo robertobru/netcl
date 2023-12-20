@@ -2,6 +2,9 @@ import requests
 from requests.auth import HTTPBasicAuth
 import json
 import urllib3
+import netmiko
+from netmiko import ConnectHandler
+import libcurl
 
 urllib3.disable_warnings()
 
@@ -12,6 +15,22 @@ s = requests.Session()
 # sample GET requests:
 url = 'http://' + ipaddress + '/rest'
 responce = s.get(url, auth=HTTPBasicAuth(username, password))
+
+
+router_mikrotik = {
+    'device_type': 'mikrotik_routeros',
+    'host':   '192.168.18.4',
+    'username': 'admin',
+    'password': 'Pap3rin0!',
+    'port': 22          # optional, defaults to 22
+
+}
+
+net_connect = ConnectHandler(**router_mikrotik)
+
+output = net_connect.send_command('/export', cmd_verify=True)
+print(output)
+
 
 # response = requests.get(url + '/interface', auth=HTTPBasicAuth(username, password))
 # for interface in response.json():
@@ -34,8 +53,8 @@ Verify=False - To be used in case the SSL on the router is self-generated and no
 # info = json.dumps({"bridge": "bridge1", "interface": "sfp-sfpplus13"})
 # response = requests.put(url + '/interface/bridge/port', auth=HTTPBasicAuth(username, password), data=info)
 
-info = json.dumps({"pvid": "300"})
-responce= requests.patch(url + '/interface/bridge/port/*1', auth=HTTPBasicAuth(username, password), data=info)
+# info = json.dumps({"pvid": "300"})
+# responce= requests.patch(url + '/interface/bridge/port/*1', auth=HTTPBasicAuth(username, password), data=info)
 '''
 
 requests.put(url, auth=HTTPBasicAuth(username,password), verify=False, data=DATA)

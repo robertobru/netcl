@@ -1,4 +1,5 @@
 from sbi.routeros import RosRestSbi
+from sbi.netmiko import NetmikoSbi
 from .switch_base import Switch
 from models import LldpNeighbor, PhyPort, VlanL3Port, Vrf
 from pydantic import IPvAnyInterface
@@ -11,10 +12,13 @@ logger = create_logger('microtik')
 
 class Microtik(Switch):
     _sbi_rest_driver: RosRestSbi = None
+    _sbi_miko_driver: NetmikoSbi = None
 
     def _reinit_sbi_drivers(self) -> None:
         if not self._sbi_rest_driver:
             self._sbi_rest_driver = RosRestSbi(self.to_device_model())
+        if not self._sbi_miko_driver:
+            self._sbi_miko_driver= NetmikoSbi(self.to_device_model())
 
     def _retrieve_info(self):
         self.reinit_sbi_drivers()
@@ -25,17 +29,21 @@ class Microtik(Switch):
 
         print(self.model_dump())
 
-    def retrieve_config(self):
+    def retrieve_config(self) -> None:
+        _config = self._sbi_miko_driver.get_info("export")
+        self.store_config(_config)
+
+    def parse_config(self) -> None:
         pass
 
     def retrieve_neighbors(self):
-        pass
+        neighbours = self._sbi_rest_driver.get('ip/neighbor')
 
     def retrieve_vlans(self):
-        pass
+        vlans = self._sbi_rest_driver.get('interface/bridge/vlan')
 
     def retrieve_ports(self):
-        pass
+        ports = self._sbi_rest_driver.get('interface?type=ether')
 
     def retrieve_port_vlan(self, port_index: str) -> dict:
         pass
@@ -44,6 +52,7 @@ class Microtik(Switch):
         pass
 
     def _add_vlan(self, vlan_ids: List[int]) -> bool:
+
         pass
 
     def _del_vlan(self, vlan_ids: List[int]) -> bool:
@@ -57,6 +66,7 @@ class Microtik(Switch):
 
     def _set_port_mode(self, port: PhyPort, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']) -> bool:
         pass
+
     def _bind_vrf(self, vrf1: Vrf, vrf2: Vrf) -> bool:
         logger.warning('VRF not supported in this switch model')
         return False
