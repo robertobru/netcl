@@ -29,7 +29,8 @@ class NetmikoSbi:
                 password=self.device.passwd.get_secret_value(),
                 ip=str(self.device.address),
                 auth_timeout=90,
-                timeout=210
+                timeout=210,
+                keepalive=30
             )
         except netmiko.exceptions.NetmikoTimeoutException:
             logger.error('NetmikoTimeoutException in authentication')
@@ -49,13 +50,20 @@ class NetmikoSbi:
                 self._netmiko_session.enable()
             output = []
             for command in commands:
-                output.append(self._netmiko_session.send_command(command, read_timeout=45))
+                logger.debug("sending command {}".format(command))
+                res = self._netmiko_session.send_command(command, read_timeout=45)
+                logger.debug("received output {}".format(res))
+                output.append(res)
+            logger.debug(output)
             return output
         except netmiko.exceptions.NetmikoTimeoutException:
+            logger.error("TimeoutException")
             raise SwitchNotConnectedException()
         except netmiko.exceptions.ReadTimeout:
+            logger.error("ReadTimeout")
             raise SwitchNotConnectedException()
         except netmiko.exceptions.AuthenticationException:
+            logger.error("AuthenticationException")
             raise SwitchNotAuthenticatedException()
 
     @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)

@@ -1,22 +1,5 @@
-from switch import Switch
-from threading import Thread
-from netdevice import Device
+import networkx as nx
+G = nx.MultiGraph([(1, 2), (1, 2), (2, 3), (3, 4)])
 
-#switch2 = Switch.from_db("hp5920")
-# for port in switch2.phy_ports:
-# switch2.retrieve_neighbors()
-
-#print(switch2.get_neighbors())
-# switch2.to_db()
-
-switchOD, thread = Switch.from_db("milli")
-
-thread.join()
-
-
-
-
-# switch.add_vlan(13)
-# switch.retrieve_info()
-#print(switch.get_neighbors())
-#print(switch.get_vlan_interfaces(vrf_name='proj2'))
+for e in G.edges(data=True):
+    print(type(e))

@@ -1,6 +1,6 @@
 from __future__ import annotations  # needed to annotate class methods returning instances
 from netdevice import Device
-from models import SwitchRequestVlanL3Port, ConfigItem, LldpNeighbor, PhyPort, VlanL3Port, Vrf, SwitchDataModel
+from models import SwitchRequestVlanL3Port, ConfigItem, LldpNeighbor, PhyPort, VlanL3Port, Vrf
 import abc
 import json
 from typing import List, Literal, Union, Tuple
@@ -16,7 +16,6 @@ logger = create_logger('switch')
 os_models = {
     'hp_comware': {'module': 'hp_comware', 'class': 'HpComware'},
     'mellanox': {'module': 'mellanox', 'class': 'Mellanox'},
-    'microtik': {'module': 'microtik', 'class': 'Microtik'}
 }
 
 
@@ -30,6 +29,16 @@ class SwitchNotAuthenticatedException(Exception):
 
 class SwitchConfigurationException(Exception):
     pass
+
+
+class SwitchDataModel(Device):
+    phy_ports: List[PhyPort] = []
+    vlan_l3_ports: List[VlanL3Port] = []
+    vrfs: List[Vrf] = []
+    vlans: List[int] = []
+    config_history: List[ConfigItem] = []
+    last_config: ConfigItem = None
+    state: Literal["init", "ready", "config_error", "auth_error", "net_error", "executing"] = "init"
 
 
 class Switch(SwitchDataModel):
@@ -56,6 +65,7 @@ class Switch(SwitchDataModel):
 
         self._update_info()
 
+    @abc.abstractmethod
     def _update_info(self):
         pass
 
@@ -125,6 +135,9 @@ class Switch(SwitchDataModel):
 
     def to_device_model(self) -> Device:
         return Device.model_validate(self, from_attributes=True)
+
+    def check_status(self):
+        return True if self.state == 'ready' else False
 
     def store_config(self, cfg: str) -> bool:
         if not self.last_config or cfg != self.last_config.config:
