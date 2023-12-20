@@ -62,14 +62,15 @@ class RosRestSbi:
         res = json.dumps(responce.text)
         return res
 
-    # POST
+    # PUT
     @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
-    def post(self, command) -> json:
-        #data = json.dumps(msg)
+    def put(self, command, msg) -> json:
+        data = json.dumps(msg)
         try:
-            responce = self._rest_session.post(
+            responce = self._rest_session.put(
                 'http://{}/rest/{}'.format(self.device.address, command),
                 auth=HTTPBasicAuth(self.device.user, self.device.passwd.get_secret_value()),
+                data=data,
                 verify=False,
                 timeout=(30, 60)
             )
