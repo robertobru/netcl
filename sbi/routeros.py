@@ -46,11 +46,12 @@ class RosRestSbi:
 
     # GET
     @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
-    def get(self, command) -> json:
+    def get(self, command) -> dict:
         try:
             responce = self._rest_session.get(
                 'http://{}/rest{}'.format(self.device.address, command),
                 auth=HTTPBasicAuth(self.device.user, self.device.passwd.get_secret_value()),
+                headers={'Content-Type': 'application/json'},
                 verify=False,
                 timeout=(30, 60)
             )
@@ -59,18 +60,19 @@ class RosRestSbi:
         logger.debug('REST status {} {}'.format(responce.status_code, responce.text))
         if responce.status_code != 200:
             raise SwitchNotAuthenticatedException()
-        res = json.dumps(responce.text)
-        return res
+        # res = json.dumps(responce.text)
+        return responce.json()
 
-    # PUT
+    # POST
     @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
-    def put(self, command, msg) -> json:
-        data = json.dumps(msg)
+    def post(self, command, data) -> dict:
+        #data = json.dumps(msg)
         try:
-            responce = self._rest_session.put(
+            responce = self._rest_session.post(
                 'http://{}/rest/{}'.format(self.device.address, command),
+                json=data,
                 auth=HTTPBasicAuth(self.device.user, self.device.passwd.get_secret_value()),
-                data=data,
+                headers={'Content-Type': 'application/json'},
                 verify=False,
                 timeout=(30, 60)
             )
@@ -79,8 +81,7 @@ class RosRestSbi:
         logger.debug('REST status {} {}'.format(responce.status_code, responce.text))
         if responce.status_code != 200:
             raise SwitchNotAuthenticatedException()
-        res = json.dumps(responce.text)
-        return res
+        return responce.json()
 
     # DELETE
     @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
@@ -89,6 +90,7 @@ class RosRestSbi:
             responce = self._rest_session.delete(
                 'http://{}/rest{}/{}'.format(self.device.address, url, ids),
                 auth=HTTPBasicAuth(self.device.user, self.device.passwd.get_secret_value()),
+                headers={'Content-Type': 'application/json'},
                 verify=False,
                 timeout=(30, 60)
             )

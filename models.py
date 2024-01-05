@@ -124,7 +124,7 @@ class PortToNetVlans(CallbackRequest):
     vids: List[int]
 
 
-class PortToNetVlansMsg(PortToNetVlans, WorkerMsg):
+class PortToNetVlansMsg(WorkerMsg, PortToNetVlans):
     pass
 
 

@@ -8,77 +8,180 @@ from utils import create_logger
 from typing import List, Literal
 
 logger = create_logger('microtik')
+default_switch_name ='tnt'
 
 
 class Microtik(Switch):
     _sbi_rest_driver: RosRestSbi = None
-    _sbi_miko_driver: NetmikoSbi = None
+    _sbi_ssh_driver: NetmikoSbi = None
+
+    def _update_info(self):
+        pass
 
     def _reinit_sbi_drivers(self) -> None:
         if not self._sbi_rest_driver:
             self._sbi_rest_driver = RosRestSbi(self.to_device_model())
-        if not self._sbi_miko_driver:
-            self._sbi_miko_driver= NetmikoSbi(self.to_device_model())
+        if not self._sbi_ssh_driver:
+            ssh_device = self.to_device_model()
+            ssh_device.model = 'mikrotik_routeros'
+            self._sbi_ssh_driver = NetmikoSbi(ssh_device)
 
     def _retrieve_info(self):
         self.reinit_sbi_drivers()
-        self.retrieve_vlans()
         self.retrieve_ports()
+        logger.info('1--------------------------------------------')
+        self.retrieve_vlans()
+        logger.info('2--------------------------------------------')
+        self.retrieve_port_vlan()
+        logger.info('3--------------------------------------------')
+        self.retrieve_vlan_interfaces()
+        logger.info('4--------------------------------------------')
+        self.create_dummy_vrf()
+        logger.info('5--------------------------------------------')
         self.retrieve_config()
+        logger.info('6--------------------------------------------')
         self.retrieve_neighbors()
 
         print(self.model_dump())
 
     def retrieve_config(self) -> None:
-        #export
-        _config = self._sbi_miko_driver.get_info("export")
-        self.store_config(_config)
-
-    def parse_config(self) -> None:
-        pass
+        _config = self._sbi_ssh_driver.get_info("export")
+        res = "{}".join(_config.split("\n")[1:])  # removing first lince since it contain the date of exporting
+        self.store_config(res)
 
     def retrieve_neighbors(self):
-        #ip/neighbour print
         neighbours = self._sbi_rest_driver.get('ip/neighbor')
+        for neigh in neighbours:
+            if 'interface' in neigh:
+                for i_name in neigh['interface'].split(','):
+                    port = next((item for item in self.phy_ports if item.name == i_name), None)
+                    if not port:
+                        logger.warning("[lldp neigh] interface {} not found".format(i_name))
+                        continue
+                    if 'identity' in neigh:
+                        port.neighbor = LldpNeighbor(
+                            neighbor=neigh['identity'],
+                            remote_interface=neigh['mac-address'] if 'mac-address' in neigh else 'NA'
+                    )
+
+    def create_dummy_vrf(self):
+        self.vrfs = [Vrf(
+            name='mobile_testbed',
+            rd=default_switch_name,
+            description='dummy Vrf for the mobile testbed',
+            rd_export=[],
+            rd_import=[],
+            ports=self.vlan_l3_ports
+        )]
 
     def retrieve_vlans(self):
-        #interface/bridge/vlan print
-        vlans = self._sbi_rest_driver.get('interface/bridge/vlan')
+        res = self._sbi_rest_driver.get('interface/bridge/vlan?bridge={}'.format(default_switch_name))
+        for item in res:
+            vlans_in_row = item["vlan-ids"].split(',')
+            for vlan_id in vlans_in_row:
+                if vlan_id not in self.vlans:
+                    self.vlans.append(vlan_id)
+            for _port_name in item['tagged'].split(','):
+                port = next((p for p in self.phy_ports if p.name == _port_name), None)
+                if not port:
+                    logger.warning('port {} not found while retrieving vlans {}'.format(_port_name, vlans_in_row))
+                    continue
+                for vlan_id in vlans_in_row:
+                    port.trunk_vlans.append(vlan_id)
 
     def retrieve_ports(self):
-        ports = self._sbi_rest_driver.get('interface?type=ether')
+        res = self._sbi_rest_driver.get('interface?type=ether')
+        logger.warning(res)
+        for item in res:
+            logger.warning(item)
+            ports_data = self._sbi_rest_driver.post(
+                'interface/ethernet/monitor',
+                {"once": "1", "numbers": "{}".format(item['.id'])}
+            )
+            port_data = next(p for p in ports_data if p['name'] == item['name'])
+            logger.warning(port_data)
+            speed = 0
+            if 'rate' in port_data:
+                if 'Gbps' in port_data['rate']:
+                    speed = int(port_data['rate'][:-4]) * 1000
+                if 'Mbps' in port_data['rate']:
+                    speed = int(port_data['rate'][:-4])
+            duplex = 'NA'
+            if 'full-duplex' in port_data:
+                if port_data['full-duplex'] == 'true':
+                    duplex = 'FULL'
+                else:
+                    duplex = 'HALF'
 
-    def retrieve_port_vlan(self, port_index: str) -> dict:
-        # interface/bridge/port/vlan print
-        pass
+            self.phy_ports.append(
+                PhyPort(
+                    index=item['.id'],
+                    name=item['name'],
+                    trunk_vlans=[],
+                    access_vlan=None,
+                    speed=speed,
+                    neighbor=None,
+                    mode='NA',
+                    status='UP' if port_data['status'] == 'link-ok' else 'DOWN',
+                    admin_status='ENABLED' if item['disabled'] == 'false' else 'DISABLED',
+                    duplex=duplex
+                )
+            )
 
-    def retrieve_vlan_interface(self, port_index: str) -> dict:
-        #interface/vlan print
-        pass
+    def retrieve_port_vlan(self) -> None:
+        vlan_port_data = self._sbi_rest_driver.get("interface/bridge/port")
+        for port in vlan_port_data:
+            phy_port = next(item for item in self.phy_ports if item.name == port['interface'])
+            phy_port.access_vlan = port['pvid'] if 'pvid' in port else None
+            if 'frame-types' in port:
+                match port['frame-types']:
+                    case 'admit-all':
+                        phy_port.mode = 'HYBRID'
+                    case 'admit-only-untagged-and-priority-tagged':
+                        phy_port.mode = 'ACCESS'
+                    case 'admit-only-vlan-tagged':
+                        phy_port.mode = 'TRUNK'
 
+    def retrieve_vlan_interfaces(self) -> None:
+        vlan_itf_data = self._sbi_rest_driver.get("interface/vlan")
+        itf_ips = self._sbi_rest_driver.get("ip/address")
+        for itf in vlan_itf_data:
+            if itf['interface'] == default_switch_name:
+                # it is a vlan interface on the managed bridge
+                itf_ip = next((item for item in itf_ips if item['interface'] == itf['name']), None)
+                ip_addr = None
+                cidr = None
+                if itf_ip:
+                    ip_addr = itf_ip['address'].split('/')[0]
+                    cidr = itf_ip['network']
+
+                self.vlan_l3_ports.append(
+                    VlanL3Port.model_validate(
+                        {
+                            'index': itf['.id'],
+                            'name': itf['name'],
+                            'vlan': itf['vlan-id'],
+                            'ipaddress': ip_addr,
+                            'cidr': cidr,
+                            'vrf': 'mobile_testbed',
+                            'description': None
+                        }
+                    )
+                )
     def _add_vlan(self, vlan_ids: List[int]) -> bool:
-        #/interface/bridge add name=bridge1 vlan-filtering=yes
-        #goto _add_vlan_to_port()
+
         pass
 
     def _del_vlan(self, vlan_ids: List[int]) -> bool:
-        #/interface/bridge remove numbers=#
         pass
 
     def _add_vlan_to_port(self, vlan_id: int, port: PhyPort, pvid: bool = False) -> bool:
-        #/interface/bridge/port add bridge = bridge1 interface = sfp-sfpplus9
-        #/interface/bridge/port add bridge = bridge1 interface = sfp-sfpplus10 pvid=10
-        #/interface/bridge/port add bridge = bridge1 interface = sfp-sfpplus11 pvid=11
-        #goto _set_port_mode()
         pass
 
     def _del_vlan_to_port(self, vlan_ids: List[int], port: PhyPort) -> bool:
-        #/interface/bridge/port remove numbers=# (numbers è la riga che vogliamo togliere)
         pass
 
     def _set_port_mode(self, port: PhyPort, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']) -> bool:
-        #/interface/bridge/vlan add bridge=bridge1 tagged=sfp-sfpplus9 untagged=sfp-sfpplus10 vlan-ids=10
-        #/interface/bridge/vlan add bridge=bridge1 tagged=sfp-sfpplus9 untagged=sfp-sfpplus11 vlan-ids=11
         pass
 
     def _bind_vrf(self, vrf1: Vrf, vrf2: Vrf) -> bool:
