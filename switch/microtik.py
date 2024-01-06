@@ -246,10 +246,36 @@ class Microtik(Switch):
             self._sbi_rest_driver.patch('/interface/bridge/vlan', new_row)
 
     def _del_vlan_to_port(self, vlan_ids: List[int], port: PhyPort) -> bool:
-        pass
+        vlan_table = self._sbi_rest_driver.get('/interface/bridge/vlan?bridge={}'.format(default_switch_name))
+        for vlan_id in vlan_ids:
+            row = next((item for item in vlan_table if vlan_id in item['vlan-ids'].split(',')), None)
+
+            if not row:
+                raise ValueError('vlan {} not declared'.format(vlan_id))
+
+            row_vlan_ids = row['vlan-ids'].split(',')
+            untagged_ports = row['untagged'].split(',')
+            tagged_ports = row['tagged'].split(',')
+
+            if len(row_vlan_ids) == 1:
+                # in this case we can simply patch row
+                updated_row = dict(row)
+                updated_row['tagged'] = ','.join(filter(lambda x: x != port.name, tagged_ports))
+                updated_row['untagged'] = ','.join(filter(lambda x: x != port.name, untagged_ports))
+                self._sbi_rest_driver.patch('/interface/bridge/vlan', updated_row)
+            else:
+                # in this case we should remove the vlan from the row, and add a new row with only that vlan and the
+                # remaining ports
+                row['vlan-ids'] = ','.join(filter(lambda x: x != vlan_id, row['vlan-ids']))
+                self._sbi_rest_driver.patch('/interface/bridge/vlan', row)
+                vlan_row = dict(row)
+                vlan_row['vlan-ids'] = vlan_id
+                vlan_row['tagged'] = ','.join(filter(lambda x: x != port.name, tagged_ports))
+                vlan_row['untagged'] = ','.join(filter(lambda x: x != port.name, untagged_ports))
+                self._sbi_rest_driver.put('/interface/bridge/vlan', vlan_row)
 
     def _set_port_mode(self, port: PhyPort, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']) -> bool:
-        pass
+        port_table = self._sbi_rest_driver('/interface/bridge/port?bridge')
 
     def _bind_vrf(self, vrf1: Vrf, vrf2: Vrf) -> bool:
         logger.warning('VRF not supported in this switch model')
