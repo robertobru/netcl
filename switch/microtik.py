@@ -22,7 +22,7 @@ class Microtik(Switch):
         if not self._sbi_rest_driver:
             self._sbi_rest_driver = RosRestSbi(self.to_device_model())
         if not self._sbi_ssh_driver:
-            ssh_device = self.to_device_model()
+            ssh_device = dict(self.to_device_model())
             ssh_device.model = 'mikrotik_routeros'
             self._sbi_ssh_driver = NetmikoSbi(ssh_device)
 
@@ -169,14 +169,81 @@ class Microtik(Switch):
                     )
                 )
     def _add_vlan(self, vlan_ids: List[int]) -> bool:
-
-        pass
+        for _id in vlan_ids:
+            data = {
+                'vlan_ids': _id,
+                'bridge': default_switch_name,
+                'tagged': default_switch_name
+            }
+            res = self._sbi_rest_driver.put('/interface/bridge/vlan', data)
 
     def _del_vlan(self, vlan_ids: List[int]) -> bool:
-        pass
+        numbers = []
+        vlan_table = self._sbi_rest_driver.get('/interface/bridge/vlan?bridge={}'.format(default_switch_name))
+        for vlan_id in vlan_ids:
+            row = next((item for item in vlan_table if vlan_id in item['vlan-ids'].split(',')), None)
+            if row:
+                row_vlan_ids = row['vlan-ids'].split(',')
+                if len(row_vlan_ids) == 1:
+                    data = {
+                        'bridge': default_switch_name,
+                        'numbers': [row['.id']]
+                    }
+                    self._sbi_rest_driver.delete('/interface/bridge/vlan', data)
+                else:
+                    logger.debug('this row contains more than one vlans')
+                    row['vlan-ids'] = ','.join(filter(lambda v: v != vlan_id, row_vlan_ids))
+                    self._sbi_rest_driver.patch('/interface/bridge/vlan', row)
+            else:
+                logger.warn('vlan {} not existing'.format(vlan_id))
+        return True
 
     def _add_vlan_to_port(self, vlan_id: int, port: PhyPort, pvid: bool = False) -> bool:
-        pass
+        vlan_table = self._sbi_rest_driver.get('/interface/bridge/vlan?bridge={}'.format(default_switch_name))
+        row = next((item for item in vlan_table if vlan_id in item['vlan-ids'].split(',')), None)
+
+        if not row:
+            raise ValueError('vlan {} not declared'.format(vlan_id))
+
+        row_vlan_ids = row['vlan-ids'].split(',')
+        untagged_ports = row['untagged'].split(',')
+        tagged_ports = row['tagged'].split(',')
+
+        if len(row_vlan_ids) == 1:
+
+            if pvid:
+                if port.name in tagged_ports:
+                    raise ValueError('delete vlan {} from tagged set of port {} before adding as untagged'.format(
+                        vlan_id, port.name))
+                untagged_ports.append(port.name)
+                row['untagged'] = ','.join(untagged_ports)
+            else:
+                if port.name in untagged_ports:
+                    raise ValueError('delete vlan {} from untagged set of port {} before adding as tagged'.format(
+                        vlan_id, port.name))
+                tagged_ports.append(port.name)
+                row['tagged'] = ','.join(tagged_ports)
+            self._sbi_rest_driver.patch('/interface/bridge/vlan', row)
+        else:
+            # in this case, the old row should be updated without the vlan_id, and a new row should be added
+            row_to_update = dict(row)
+            row_to_update['vlan_ids'] = ",".join(filter(lambda x: x != vlan_id, row_vlan_ids))
+            self._sbi_rest_driver.patch('/interface/bridge/vlan', row_to_update)
+            new_row = dict(row)
+            new_row['vlan_ids'] = vlan_id
+            if pvid:
+                if port.name in tagged_ports:
+                    raise ValueError('delete vlan {} from tagged set of port {} before adding as untagged'.format(
+                        vlan_id, port.name))
+                untagged_ports.append(port.name)
+                new_row['untagged'] = ','.join(untagged_ports)
+            else:
+                if port.name in untagged_ports:
+                    raise ValueError('delete vlan {} from untagged set of port {} before adding as tagged'.format(
+                        vlan_id, port.name))
+                tagged_ports.append(port.name)
+                new_row['tagged'] = ','.join(tagged_ports)
+            self._sbi_rest_driver.patch('/interface/bridge/vlan', new_row)
 
     def _del_vlan_to_port(self, vlan_ids: List[int], port: PhyPort) -> bool:
         pass

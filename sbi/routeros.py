@@ -63,6 +63,44 @@ class RosRestSbi:
         # res = json.dumps(responce.text)
         return responce.json()
 
+    # PUT
+    @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
+    def put(self, command, data) -> dict:
+        try:
+            res = self._rest_session.put(
+                'http://{}/rest/{}'.format(self.device.address, command),
+                json=data,
+                auth=HTTPBasicAuth(self.device.user, self.device.passwd.get_secret_value()),
+                headers={'Content-Type': 'application/json'},
+                verify=False,
+                timeout=(30, 60)
+            )
+        except requests.exceptions.ConnectionError:
+            raise SwitchNotConnectedException
+        logger.debug('REST status {} {}'.format(res.status_code, res.text))
+        if res.status_code != 200:
+            raise SwitchNotAuthenticatedException()
+        return res.json()
+
+    # PATCH
+    @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
+    def patch(self, command, data) -> dict:
+        try:
+            res = self._rest_session.patch(
+                'http://{}/rest/{}'.format(self.device.address, command),
+                json=data,
+                auth=HTTPBasicAuth(self.device.user, self.device.passwd.get_secret_value()),
+                headers={'Content-Type': 'application/json'},
+                verify=False,
+                timeout=(30, 60)
+            )
+        except requests.exceptions.ConnectionError:
+            raise SwitchNotConnectedException
+        logger.debug('REST status {} {}'.format(res.status_code, res.text))
+        if res.status_code != 200:
+            raise SwitchNotAuthenticatedException()
+        return res.json()
+
     # POST
     @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
     def post(self, command, data) -> dict:
