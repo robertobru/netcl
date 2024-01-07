@@ -1,16 +1,9 @@
-import json
-import time
 import requests
 from requests.auth import HTTPBasicAuth
-from netdevice import Device
-from utils import create_logger
-from pydantic import BaseModel, Field
 from tenacity import retry, stop_after_attempt, retry_if_exception_type
 from netdevice import Device
 from utils import create_logger
-from switch.switch_base import SwitchNotConnectedException, SwitchNotAuthenticatedException, \
-    SwitchConfigurationException
-from typing import List, Literal
+from switch.switch_base import SwitchNotConnectedException, SwitchNotAuthenticatedException
 
 
 logger = create_logger('routeros')
@@ -34,7 +27,7 @@ class RosRestSbi:
     @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
     def authenticate(self):
         try:
-            responce = self._rest_session.get(
+            res = self._rest_session.get(
                 'http://{}'.format(self.device.address),
                 auth=HTTPBasicAuth(self.device.user, self.device.passwd.get_secret_value()),
                 verify=False,
@@ -42,13 +35,13 @@ class RosRestSbi:
             )
         except requests.exceptions.ConnectionError:
             raise SwitchNotConnectedException
-        logger.debug('code {}, {}'.format(responce.status_code, responce.content))
+        logger.debug('code {}, {}'.format(res.status_code, res.content))
 
     # GET
     @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
     def get(self, command) -> dict:
         try:
-            responce = self._rest_session.get(
+            res = self._rest_session.get(
                 'http://{}/rest{}'.format(self.device.address, command),
                 auth=HTTPBasicAuth(self.device.user, self.device.passwd.get_secret_value()),
                 headers={'Content-Type': 'application/json'},
@@ -57,11 +50,11 @@ class RosRestSbi:
             )
         except requests.exceptions.ConnectionError:
             raise SwitchNotConnectedException
-        logger.debug('REST status {} {}'.format(responce.status_code, responce.text))
-        if responce.status_code != 200:
+        logger.debug('REST status {} {}'.format(res.status_code, res.text))
+        if res.status_code != 200:
             raise SwitchNotAuthenticatedException()
-        # res = json.dumps(responce.text)
-        return responce.json()
+        # res = json.dumps(res.text)
+        return res.json()
 
     # PUT
     @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
@@ -104,9 +97,8 @@ class RosRestSbi:
     # POST
     @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
     def post(self, command, data) -> dict:
-        #data = json.dumps(msg)
         try:
-            responce = self._rest_session.post(
+            res = self._rest_session.post(
                 'http://{}/rest/{}'.format(self.device.address, command),
                 json=data,
                 auth=HTTPBasicAuth(self.device.user, self.device.passwd.get_secret_value()),
@@ -116,16 +108,16 @@ class RosRestSbi:
             )
         except requests.exceptions.ConnectionError:
             raise SwitchNotConnectedException
-        logger.debug('REST status {} {}'.format(responce.status_code, responce.text))
-        if responce.status_code != 200:
+        logger.debug('REST status {} {}'.format(res.status_code, res.text))
+        if res.status_code != 200:
             raise SwitchNotAuthenticatedException()
-        return responce.json()
+        return res.json()
 
     # DELETE
     @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
     def delete(self, url, ids):
         try:
-            responce = self._rest_session.delete(
+            res = self._rest_session.delete(
                 'http://{}/rest{}/{}'.format(self.device.address, url, ids),
                 auth=HTTPBasicAuth(self.device.user, self.device.passwd.get_secret_value()),
                 headers={'Content-Type': 'application/json'},
@@ -134,7 +126,6 @@ class RosRestSbi:
             )
         except requests.exceptions.ConnectionError:
             raise SwitchNotConnectedException
-        logger.debug('REST status {} {}'.format(responce.status_code, responce.text))
-        if responce.status_code != 200:
+        logger.debug('REST status {} {}'.format(res.status_code, res.text))
+        if res.status_code != 200:
             raise SwitchNotAuthenticatedException()
-

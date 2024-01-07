@@ -2,13 +2,12 @@ from sbi.routeros import RosRestSbi
 from sbi.netmiko import NetmikoSbi
 from .switch_base import Switch
 from models import LldpNeighbor, PhyPort, VlanL3Port, Vrf
-from pydantic import IPvAnyInterface
-from netaddr import IPAddress
+from ipaddress import IPv4Network, IPv4Interface
 from utils import create_logger
 from typing import List, Literal
 
 logger = create_logger('microtik')
-default_switch_name ='tnt'
+default_switch_name = 'tnt'
 
 
 class Microtik(Switch):
@@ -22,24 +21,17 @@ class Microtik(Switch):
         if not self._sbi_rest_driver:
             self._sbi_rest_driver = RosRestSbi(self.to_device_model())
         if not self._sbi_ssh_driver:
-            ssh_device = dict(self.to_device_model())
-            ssh_device.model = 'mikrotik_routeros'
+            ssh_device = self.to_device_model().model_copy(update={'model': 'mikrotik_routeros'})
             self._sbi_ssh_driver = NetmikoSbi(ssh_device)
 
     def _retrieve_info(self):
         self.reinit_sbi_drivers()
         self.retrieve_ports()
-        logger.info('1--------------------------------------------')
         self.retrieve_vlans()
-        logger.info('2--------------------------------------------')
         self.retrieve_port_vlan()
-        logger.info('3--------------------------------------------')
         self.retrieve_vlan_interfaces()
-        logger.info('4--------------------------------------------')
         self.create_dummy_vrf()
-        logger.info('5--------------------------------------------')
         self.retrieve_config()
-        logger.info('6--------------------------------------------')
         self.retrieve_neighbors()
 
         print(self.model_dump())
@@ -62,7 +54,7 @@ class Microtik(Switch):
                         port.neighbor = LldpNeighbor(
                             neighbor=neigh['identity'],
                             remote_interface=neigh['mac-address'] if 'mac-address' in neigh else 'NA'
-                    )
+                        )
 
     def create_dummy_vrf(self):
         self.vrfs = [Vrf(
@@ -168,17 +160,17 @@ class Microtik(Switch):
                         }
                     )
                 )
-    def _add_vlan(self, vlan_ids: List[int]) -> bool:
+
+    def _add_vlan(self, vlan_ids: List[int]):
         for _id in vlan_ids:
             data = {
                 'vlan_ids': _id,
                 'bridge': default_switch_name,
                 'tagged': default_switch_name
             }
-            res = self._sbi_rest_driver.put('/interface/bridge/vlan', data)
+            self._sbi_rest_driver.put('/interface/bridge/vlan', data)
 
-    def _del_vlan(self, vlan_ids: List[int]) -> bool:
-        numbers = []
+    def _del_vlan(self, vlan_ids: List[int]):
         vlan_table = self._sbi_rest_driver.get('/interface/bridge/vlan?bridge={}'.format(default_switch_name))
         for vlan_id in vlan_ids:
             row = next((item for item in vlan_table if vlan_id in item['vlan-ids'].split(',')), None)
@@ -196,56 +188,37 @@ class Microtik(Switch):
                     self._sbi_rest_driver.patch('/interface/bridge/vlan', row)
             else:
                 logger.warn('vlan {} not existing'.format(vlan_id))
-        return True
 
-    def _add_vlan_to_port(self, vlan_id: int, port: PhyPort, pvid: bool = False) -> bool:
-        vlan_table = self._sbi_rest_driver.get('/interface/bridge/vlan?bridge={}'.format(default_switch_name))
-        row = next((item for item in vlan_table if vlan_id in item['vlan-ids'].split(',')), None)
-
-        if not row:
-            raise ValueError('vlan {} not declared'.format(vlan_id))
+    def _add_vlan_to_port(self, vlan_id: int, port: PhyPort, pvid: bool = False):
+        row = self._get_vlan_row(vlan_id)
 
         row_vlan_ids = row['vlan-ids'].split(',')
         untagged_ports = row['untagged'].split(',')
         tagged_ports = row['tagged'].split(',')
 
-        if len(row_vlan_ids) == 1:
-
-            if pvid:
-                if port.name in tagged_ports:
-                    raise ValueError('delete vlan {} from tagged set of port {} before adding as untagged'.format(
-                        vlan_id, port.name))
-                untagged_ports.append(port.name)
-                row['untagged'] = ','.join(untagged_ports)
-            else:
-                if port.name in untagged_ports:
-                    raise ValueError('delete vlan {} from untagged set of port {} before adding as tagged'.format(
-                        vlan_id, port.name))
-                tagged_ports.append(port.name)
-                row['tagged'] = ','.join(tagged_ports)
-            self._sbi_rest_driver.patch('/interface/bridge/vlan', row)
-        else:
+        if len(row_vlan_ids) > 1:
             # in this case, the old row should be updated without the vlan_id, and a new row should be added
             row_to_update = dict(row)
             row_to_update['vlan_ids'] = ",".join(filter(lambda x: x != vlan_id, row_vlan_ids))
             self._sbi_rest_driver.patch('/interface/bridge/vlan', row_to_update)
-            new_row = dict(row)
-            new_row['vlan_ids'] = vlan_id
-            if pvid:
-                if port.name in tagged_ports:
-                    raise ValueError('delete vlan {} from tagged set of port {} before adding as untagged'.format(
-                        vlan_id, port.name))
-                untagged_ports.append(port.name)
-                new_row['untagged'] = ','.join(untagged_ports)
-            else:
-                if port.name in untagged_ports:
-                    raise ValueError('delete vlan {} from untagged set of port {} before adding as tagged'.format(
-                        vlan_id, port.name))
-                tagged_ports.append(port.name)
-                new_row['tagged'] = ','.join(tagged_ports)
-            self._sbi_rest_driver.patch('/interface/bridge/vlan', new_row)
 
-    def _del_vlan_to_port(self, vlan_ids: List[int], port: PhyPort) -> bool:
+            # create a new row only for the vlan id under elaboration
+            row['vlan_ids'] = vlan_id
+        if pvid:
+            if port.name in tagged_ports:
+                raise ValueError('delete vlan {} from tagged set of port {} before adding as untagged'.format(
+                    vlan_id, port.name))
+            untagged_ports.append(port.name)
+            row['untagged'] = ','.join(untagged_ports)
+        else:
+            if port.name in untagged_ports:
+                raise ValueError('delete vlan {} from untagged set of port {} before adding as tagged'.format(
+                    vlan_id, port.name))
+            tagged_ports.append(port.name)
+            row['tagged'] = ','.join(tagged_ports)
+        self._sbi_rest_driver.patch('/interface/bridge/vlan', row)
+
+    def _del_vlan_to_port(self, vlan_ids: List[int], port: PhyPort):
         vlan_table = self._sbi_rest_driver.get('/interface/bridge/vlan?bridge={}'.format(default_switch_name))
         for vlan_id in vlan_ids:
             row = next((item for item in vlan_table if vlan_id in item['vlan-ids'].split(',')), None)
@@ -272,10 +245,22 @@ class Microtik(Switch):
                 vlan_row['vlan-ids'] = vlan_id
                 vlan_row['tagged'] = ','.join(filter(lambda x: x != port.name, tagged_ports))
                 vlan_row['untagged'] = ','.join(filter(lambda x: x != port.name, untagged_ports))
+                vlan_row.pop('.id')
                 self._sbi_rest_driver.put('/interface/bridge/vlan', vlan_row)
 
-    def _set_port_mode(self, port: PhyPort, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']) -> bool:
-        port_table = self._sbi_rest_driver('/interface/bridge/port?bridge')
+    def _set_port_mode(self, port: PhyPort, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']):
+        port_table = self._sbi_rest_driver.get('/interface/bridge/port?bridge')
+        port_row = next(item for item in port_table if item['interface'] == port.name)
+
+        match port_mode:
+            case 'ACCESS':
+                port_row['frame-types'] = 'admit-only-untagged-and-priority-tagged'
+            case 'HYBRID':
+                port_row['frame-types'] = 'admit-all'
+            case 'TRUNK':
+                port_row['frame-types'] = 'admit-only-vlan-tagged'
+
+        self._sbi_rest_driver.patch('interfaces/bridge/port', port_row)
 
     def _bind_vrf(self, vrf1: Vrf, vrf2: Vrf) -> bool:
         logger.warning('VRF not supported in this switch model')
@@ -285,11 +270,78 @@ class Microtik(Switch):
         logger.warning('VRF not supported in this switch model')
         return False
 
-    def _add_vlan_to_vrf(self, vrf: Vrf, vlan_interface: VlanL3Port) -> bool:
-        pass
+    def _get_vlan_row(self, vid: int) -> dict:
+        vlan_table = self._sbi_rest_driver.get('/interface/bridge/vlan?bridge={}'.format(default_switch_name))
+        vlan_row = next((item for item in vlan_table if str(vid) in item['vlan-ids'].split(',')), None)
+        if not vlan_row:
+            raise ValueError('vlan {} not existing'.format(vid))
+        return vlan_row
 
-    def _del_vlan_to_vrf(self, vrf: Vrf, vlan_interface: VlanL3Port) -> bool:
-        pass
+    def _add_vlan_to_vrf(self, vrf: Vrf, vlan_interface: VlanL3Port):
+        # create a vlan L3 interface and associate it to the dummy vrf
 
-    def commit_and_save(self) -> bool:
+        # as first, we need to assure that the vlan id is enabled as trunk in the default bridge
+        vlan_row = self._get_vlan_row(vlan_interface.vlan)
+
+        bridge_tagged = vlan_row['tagged'].split(',')
+        if default_switch_name not in bridge_tagged:
+            bridge_tagged.append(default_switch_name)
+            vlan_row['tagged'] = ','.join(bridge_tagged)
+            self._sbi_rest_driver.patch('/interface/bridge/vlan', vlan_row)
+
+        # now we can create the vlan interface
+        data = {
+            'name': vlan_interface.name,
+            'vlan-id': vlan_interface.vlan,
+            'interface': default_switch_name
+        }
+        self._sbi_rest_driver.put('/interface/vlan', data)
+
+        # finally we have to set the ip address
+        netmask = str(IPv4Network(str(vlan_interface.cidr)).netmask)
+        data = {
+            'address': IPv4Interface('{}/{}'.format(vlan_interface.ipaddress, netmask)).with_prefixlen,
+            'network': vlan_interface.cidr,
+            'interface': vlan_interface.name
+        }
+        self._sbi_rest_driver.put('/ip/address', data)
+
+    def _del_vlan_to_vrf(self, vrf: Vrf, vlan_interface: VlanL3Port):
+        # first: delete IP address
+        ip_addr_table = self._sbi_rest_driver.get('/ip/address')
+        ip_addr_row = next((item for item in ip_addr_table if item['interface'] == vlan_interface.name), None)
+        if ip_addr_row:
+            data = {
+                'numbers': ip_addr_row['.id']
+            }
+            self._sbi_rest_driver.delete('/ip/address', data)
+
+        # second: delete the vlan interface
+        vlan_itf_table = self._sbi_rest_driver.get('/interface/vlan')
+        vlan_itf_row = next((item for item in vlan_itf_table if item['vlan-id'] == vlan_interface.vlan), None)
+        if vlan_itf_row:
+            data = {
+                'numbers': vlan_itf_row['.id']
+            }
+            self._sbi_rest_driver.delete('/interface/vlan', data)
+
+        # finally remove bridge interface from tagged list
+        vlan_row = self._get_vlan_row(vlan_interface.vlan)
+        vlans_in_row = vlan_row['vlan-ids'].split(',')
+        tagged_itf = vlan_row['tagged'].split(',')
+        if len(vlans_in_row) > 1:
+            # remove vlan id from the original row if the row includes multiple vlans
+            vlan_row['vlan-ids'] = ','.join(filter(lambda x: x != vlan_interface.vlan, vlans_in_row))
+            self._sbi_rest_driver.patch('/interface/bridge/vlan', vlan_row)
+            # now add a row for the vlan under elaboration
+            vlan_row['vlan-ids'] = vlan_interface.vlan
+            vlan_row['tagged'] = ','.join(filter(lambda x: x != default_switch_name, tagged_itf))
+            vlan_row.pop('.id')
+            self._sbi_rest_driver.put('/interface/bridge/vlan', vlan_row)
+        else:
+            # patch the vlan row to remove the default bridge from tagged
+            vlan_row['tagged'] = ','.join(filter(lambda x: x != default_switch_name, tagged_itf))
+            self._sbi_rest_driver.patch('/interface/bridge/vlan', vlan_row)
+
+    def commit_and_save(self):
         pass
