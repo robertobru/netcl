@@ -61,7 +61,7 @@ data = requests.put(
     data=json.dumps({"frame-types": "admit-only-vlan-tagged", "bridge": "tnt", "interface": "sfp-sfpplus1"})
 )
 print(data.status_code, data.text)
-"""
+
 input_data = models.Device.model_validate(
     {
         'name': 'microtik',
@@ -72,3 +72,22 @@ input_data = models.Device.model_validate(
     }
 )
 switch = switch.switch_base.Switch.create(input_data)
+"""
+
+switch, thread = switch.switch_base.Switch.from_db('microtik')
+thread.join()
+switch.update_info()
+"""switch.add_vlan([11, 12])
+switch.update_info()
+switch.del_vlan([14, 15])
+switch.update_info()"""
+# switch.add_vlan_to_port(11, "sfp-sfpplus1", 'TRUNK')
+# switch.del_vlan_to_port([11], "sfp-sfpplus1")
+
+# switch.add_vlan_to_vrf()
+l3port = models.SwitchRequestVlanL3Port(vlan=11, ipaddress='10.11.0.1', cidr='10.11.0.0/16', vrf='mobile_testbed')
+switch.del_vlan_to_vrf(switch.vrfs[0].name, l3port.vlan)
+switch.add_vlan_to_vrf(switch.vrfs[0], l3port)
+switch.update_info()
+switch.to_db()
+

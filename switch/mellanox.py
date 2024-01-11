@@ -1,6 +1,6 @@
 from sbi.xml import MlnxOsXgRequest, XmlRestSbi, create_multinode_request
 from .switch_base import Switch
-from models import LldpNeighbor, PhyPort, VlanL3Port, Vrf
+from models import LldpNeighbor, PhyPort, VlanL3Port, Vrf, SwitchRequestVlanL3Port
 from pydantic import IPvAnyInterface, IPvAnyAddress
 from netaddr import IPAddress, IPNetwork
 from utils import create_logger
@@ -267,7 +267,7 @@ class Mellanox(Switch):
         logger.warning('VRF not supported in this switch model')
         return False
 
-    def _add_vlan_to_vrf(self, vrf: Vrf, vlan_interface: VlanL3Port) -> bool:
+    def _add_vlan_to_vrf(self, vrf: Vrf, vlan_interface: SwitchRequestVlanL3Port) -> bool:
         pass
 
     def _del_vlan_to_vrf(self, vrf: Vrf, vlan_interface: VlanL3Port) -> bool:

@@ -1,6 +1,6 @@
 from __future__ import annotations  # needed to annotate class methods returning instances
 from netdevice import Device
-from models import SwitchRequestVlanL3Port, ConfigItem, LldpNeighbor, PhyPort, VlanL3Port, Vrf
+from models import SwitchRequestVlanL3Port, ConfigItem, LldpNeighbor, PhyPort, VlanL3Port, Vrf, SwitchDataModel
 import abc
 import json
 from typing import List, Literal, Union, Tuple
@@ -30,16 +30,6 @@ class SwitchNotAuthenticatedException(Exception):
 
 class SwitchConfigurationException(Exception):
     pass
-
-
-class SwitchDataModel(Device):
-    phy_ports: List[PhyPort] = []
-    vlan_l3_ports: List[VlanL3Port] = []
-    vrfs: List[Vrf] = []
-    vlans: List[int] = []
-    config_history: List[ConfigItem] = []
-    last_config: ConfigItem = None
-    state: Literal["init", "ready", "config_error", "auth_error", "net_error", "executing"] = "init"
 
 
 class Switch(SwitchDataModel):
@@ -208,8 +198,11 @@ class Switch(SwitchDataModel):
         pass
 
     def del_vlan(self, vlan_ids: List[int], force: bool = False):
+        logger.info('self.vlans: {}'.format(self.vlans))
         existing_vlans = [item for item in vlan_ids if item in self.vlans]
+        logger.info('existing_vlans: {}'.format(existing_vlans))
         missing_vlans = list(set(vlan_ids) - set(existing_vlans))
+        logger.info('missing_vlans: {}'.format(missing_vlans))
         if missing_vlans:
             if force:
                 logger.warn('vlans {} are not configured in this switch. Skipping.'.format(missing_vlans))
@@ -353,6 +346,7 @@ class Switch(SwitchDataModel):
         if vlan_interface.vlan not in self.vlans:
             logger.warn("vlan {} not configured on switch {}. Adding it.".format(vlan_interface.vlan, self.name))
             self.add_vlan([vlan_interface.vlan])
+
         return self._add_vlan_to_vrf(vrf, vlan_interface)
 
     @abc.abstractmethod
