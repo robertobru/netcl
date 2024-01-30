@@ -14,7 +14,7 @@ import paramiko
 '''
 endpoint = []
 
-with open("config.yaml", 'r') as stream:
+with open("config.json", 'r') as stream:
     try:
         nfvcl_conf = ruamel.yaml.safe_load(stream)
     except ruamel.yaml.YAMLError as exc:

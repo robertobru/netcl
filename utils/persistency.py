@@ -1,59 +1,15 @@
-import json
 from pymongo import MongoClient
 from utils.util import *
 
+url_str = ""
+if netcl_conf.mongodb.user:
+    url_str = "mongodb://{}:{}@{}:{}/".format(
+        netcl_conf.mongodb.user, netcl_conf.mongodb.password, netcl_conf.mongodb.host, netcl_conf.mongodb.port)
+else:
+    url_str = "mongodb://{}:{}/".format(netcl_conf.mongodb.host, netcl_conf.mongodb.port)
 
-persLayer = MongoClient("mongodb://" + mongodb_host + ":" + mongodb_port + "/")
-OSSdb = persLayer[mongodb_db]
-
-persistent_collections = [
-    "blueprints",
-    "license",
-    "nsd_templates",
-    "nsd_templates_sol006",
-    "pdu",
-    "plmn",
-    "pnf",
-    "ue"
-]
-
-volatile_collections = [
-    "action_output",
-    "blueprint-instances",
-    "blueprint_slice_intent",
-    "ip_addresses",
-    "nfv_performance",
-    "osm_status",
-    "vnfi"
-]
-
-
-class db_management:
-    def backup_DB(self):
-        data = {}
-        for c in persistent_collections:
-            data[c] = []
-            db = OSSdb[c]
-            cursor = db.find({})
-            for document in cursor:
-                document.pop("_id")
-                data[c].append(document)
-
-        with open('../db_backup.json', 'w') as file:
-            json.dump(data, file)
-        # print(data)
-
-    def install_DB(self):
-        # create all the collections
-        for c in persistent_collections + volatile_collections:
-            print(c)
-        with open('../db_backup.json', 'r') as file:
-            data = json.load(file)
-        for collection in data:
-            print(data[collection])
-
-    def clean_volatile(self):
-        pass
+persLayer = MongoClient(url_str)
+OSSdb = persLayer[netcl_conf.mongodb.db]
 
 
 class DB:
