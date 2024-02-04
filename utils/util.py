@@ -18,10 +18,11 @@ class MongoDbConfig(BaseModel):
 class ConfigFile(BaseModel):
     mongodb: MongoDbConfig
 
+
 def create_logger(name: str) -> logging.getLogger:
     # create logger
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
+    _logger = logging.getLogger(name)
+    _logger.setLevel(logging.DEBUG)
     # create console handler and set level to debug
     ch = logging.StreamHandler()
     ch.setLevel(logging.DEBUG)
@@ -30,8 +31,8 @@ def create_logger(name: str) -> logging.getLogger:
     # add formatter to ch
     ch.setFormatter(formatter)
     # add ch to logger
-    logger.addHandler(ch)
-    return logger
+    _logger.addHandler(ch)
+    return _logger
 
 
 logger = create_logger('utils')

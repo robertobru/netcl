@@ -23,7 +23,7 @@ NetWorkerOperationType = Literal[
     'mod_port_vlan'
 ]
 NetWorkerOperationStates = Literal['InProgress', 'Failed', 'Success']
-LinkModes = Literal['ACCESS', 'TRUNK', 'HYBRID', 'NA']
+LinkModes = Literal['ACCESS', 'TRUNK', 'HYBRID', 'ROUTED', 'NA']
 LinkStates = Literal['UP', 'DOWN', 'NA']
 LinkAdminStates = Literal['ENABLED', 'DISABLED', 'NA']
 SwitchStates = Literal["init", "reinit", "ready", "config_error", "auth_error", "net_error", "executing"]

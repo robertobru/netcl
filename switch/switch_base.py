@@ -16,7 +16,8 @@ logger = create_logger('switch')
 os_models = {
     'hp_comware': {'module': 'hp_comware', 'class': 'HpComware'},
     'mellanox': {'module': 'mellanox', 'class': 'Mellanox'},
-    'microtik': {'module': 'microtik', 'class': 'Microtik'}
+    'microtik': {'module': 'microtik', 'class': 'Microtik'},
+    'sonic': {'module': 'sonic', 'class': 'Sonic'}
 }
 
 
