@@ -8,6 +8,7 @@ from typing import List, Literal
 
 logger = create_logger('microtik')
 default_switch_name = 'tnt'
+dummy_vrf_name = 'proj_tnt_mobile'
 
 
 class Microtik(Switch):
@@ -64,7 +65,7 @@ class Microtik(Switch):
 
     def create_dummy_vrf(self):
         self.vrfs = [Vrf(
-            name='mobile_testbed',
+            name=dummy_vrf_name,
             rd=default_switch_name,
             description='dummy Vrf for the mobile testbed',
             rd_export=[],
