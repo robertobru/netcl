@@ -163,6 +163,10 @@ class VlanL3Port(BaseModel):
     description: Union[str, None] = None
 
 
+class IpV4Route(BaseModel):
+    prefix: IPvAnyNetwork
+    nexthop: Union[IPvAnyAddress, Literal['local']]
+
 class Vrf(BaseModel):
     name: str
     rd: str
@@ -170,6 +174,8 @@ class Vrf(BaseModel):
     rd_export: List[str] = []
     rd_import: List[str] = []
     ports: List[VlanL3Port]
+    routing_table: List[IpV4Route] = []
+
 
     def __eq__(self, other):
         return self.name == other.name and self.rd == other.rd
