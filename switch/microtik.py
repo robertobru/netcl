@@ -8,7 +8,7 @@ from typing import List, Literal
 
 logger = create_logger('microtik')
 default_switch_name = 'tnt'
-dummy_vrf_name = 'proj_tnt_mobile'
+dummy_vrf_name = 'proj'
 
 
 class Microtik(Switch):
@@ -163,7 +163,7 @@ class Microtik(Switch):
                             'vlan': int(itf['vlan-id']),
                             'ipaddress': ip_addr,
                             'cidr': cidr,
-                            'vrf': 'mobile_testbed',
+                            'vrf': 'proj',
                             'description': None
                         }
                     )
@@ -284,7 +284,7 @@ class Microtik(Switch):
             raise ValueError('vlan {} not existing'.format(vid))
         return vlan_row
 
-    def _add_vlan_to_vrf(self, vrf: Vrf, vlan_interface: SwitchRequestVlanL3Port):
+    def _add_vlan_to_vrf(self, vrf: Vrf, vlan_interface: SwitchRequestVlanL3Port) -> bool:
         # create a vlan L3 interface and associate it to the dummy vrf
 
         # as first, we need to assure that the vlan id is enabled as trunk in the default bridge
@@ -314,6 +314,7 @@ class Microtik(Switch):
         }
         logger.debug(data)
         self._sbi_rest_driver.put('/ip/address', data)
+        return True
 
     def _del_vlan_to_vrf(self, vrf: Vrf, vlan_interface: VlanL3Port):
         # first: delete IP address
@@ -343,8 +344,8 @@ class Microtik(Switch):
             self._sbi_rest_driver.put('/interface/bridge/vlan', vlan_row)
         else:
             # patch the vlan row to remove the default bridge from tagged
-            data = {'tagged': ','.join(filter(lambda x: x != default_switch_name, tagged_itf))}
-            self._sbi_rest_driver.patch('/interface/bridge/vlan/{}'.format(vlan_row['.id']), data)
+            # data = {'tagged': ','.join(filter(lambda x: x != default_switch_name, tagged_itf))}
+            self._sbi_rest_driver.delete('/interface/bridge/vlan/{}'.format(vlan_row['.id']))
 
     def commit_and_save(self):
         pass

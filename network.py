@@ -295,6 +295,7 @@ class Network:
         if res:
             self.group_table_to_db()
             selected_switch.update_info()  # FixMe: put it in a thread?
+            selected_switch.to_db()
         else:
             raise ValueError('create_net_vlan failed due to switch-level problems')
         return res
@@ -308,8 +309,8 @@ class Network:
 
         selected_vrf_name = self.groups[msg.group]
         selected_switch = self.get_switch_by_vrf(selected_vrf_name)
-        # res = selected_switch.del_vlan_to_vrf(selected_vrf_name, msg.vid)
-        res = selected_switch.del_vlan_itf(msg.vid)
+        res = selected_switch.del_vlan_to_vrf(selected_vrf_name, msg.vid)
+        # res = selected_switch.del_vlan_itf(msg.vid)
 
         # check if VRF is now empty
         vrf = next(item for item in selected_switch.vrfs if item.name == selected_vrf_name)
@@ -319,6 +320,7 @@ class Network:
             self.group_table_to_db()
         # the configuration is changed on the device, retrieve the new config from the switch
         selected_switch.update_info()
+        selected_switch.to_db()
         return res
 
     def modify_net_vlan(self, msg: NetVlanMsg):
