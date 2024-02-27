@@ -267,7 +267,7 @@ class Microtik(Switch):
             case 'TRUNK':
                 data['frame-types'] = 'admit-only-vlan-tagged'
 
-        self._sbi_rest_driver.patch('interfaces/bridge/port/{}'.format(port_row['.id']), data)
+        self._sbi_rest_driver.patch('interface/bridge/port/{}'.format(port_row['.id']), data)
 
     def _bind_vrf(self, vrf1: Vrf, vrf2: Vrf) -> bool:
         logger.warning('VRF not supported in this switch model')

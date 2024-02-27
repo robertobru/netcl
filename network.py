@@ -106,7 +106,7 @@ class Network:
 
         if vid not in self.vlan_terminations.keys():
             return False
-        switch_names = self.vlan_terminations[vid].get_sitch_names()
+        switch_names = self.vlan_terminations[vid].get_switch_names()
         if operation == 'add':
             return len(switch_names.union(set(switch_name))) > 1
         elif operation == 'del':
