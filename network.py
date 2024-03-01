@@ -352,6 +352,9 @@ class Network:
                 msg.operation_id, missing_vlan_on_switch, switch.name))
             switch.add_vlan(missing_vlan_on_switch)
 
+            switch.update_info()
+            switch.to_db()
+
         logger.info("[{}] Setting TRUNK VLANs {} on port {} of switch {}".format(
             msg.operation_id, msg.vids, port.name, switch.name
         ))
