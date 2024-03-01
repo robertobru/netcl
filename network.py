@@ -361,6 +361,9 @@ class Network:
             else:
                 logger.warning("[{}] VLAN {} already present in port {} of switch {}".format(
                     msg.operation_id, vlan_id, port.name, switch.name))
+                
+        switch.update_info()
+        switch.to_db()
 
         # check if vlan connectivity among switches should be provided
         for vlan_id in msg.vids:
@@ -372,6 +375,9 @@ class Network:
                         logger.info("[{}] adding VLAN {} to backbone link {}".format(msg.operation_id, vlan_id, edge))
                         backbone_switch, backbone_port = self.from_topology_link_to_switch_port(edge)
                         backbone_switch.add_vlan_to_port(vlan_id, backbone_port.name)
+
+        switch.update_info()
+        switch.to_db()
 
     def del_port_vlan(self, msg: PortToNetVlansMsg):
         # note: this methods delete incrementally trunk vlans on the specified port. Other Vlans will be mantained.

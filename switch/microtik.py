@@ -256,7 +256,7 @@ class Microtik(Switch):
                 self._sbi_rest_driver.put('/interface/bridge/vlan', vlan_row)
 
     def _set_port_mode(self, port: PhyPort, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']):
-        port_table = self._sbi_rest_driver.get('/interface/bridge/port?bridge')
+        port_table = self._sbi_rest_driver.get('/interface/bridge/port')
         port_row = next(item for item in port_table if item['interface'] == port.name)
         data = {}
         match port_mode:
@@ -267,6 +267,7 @@ class Microtik(Switch):
             case 'TRUNK':
                 data['frame-types'] = 'admit-only-vlan-tagged'
 
+        port.mode = port_mode
         self._sbi_rest_driver.patch('interface/bridge/port/{}'.format(port_row['.id']), data)
 
     def _bind_vrf(self, vrf1: Vrf, vrf2: Vrf) -> bool:
