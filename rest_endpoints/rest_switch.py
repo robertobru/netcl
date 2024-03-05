@@ -21,6 +21,7 @@ device_api_router = APIRouter(
 class SwitchListItem(BaseModel):
     name: str
     model: str
+    phy_ports: list
     state: Literal["init", "reinit", "ready", "config_error", "auth_error", "net_error", "executing"]
 
 
@@ -33,7 +34,7 @@ async def get_switch(switch_name: str) -> Dict:
                     'description': "Switch {} not found".format(switch_name)}
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=data)
         else:
-            return switch.model_dump()
+            return switch[0].model_dump()
     except Exception:
         logger.error(traceback.format_exc())
         data = {'status': 'error', 'resource': 'switch',
