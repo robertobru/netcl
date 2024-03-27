@@ -28,13 +28,14 @@ class SwitchListItem(BaseModel):
 @device_api_router.get("/{switch_name}", response_model=SwitchDataModel)
 async def get_switch(switch_name: str) -> Dict:
     try:
-        switch = Switch.from_db(switch_name)
+        switch, thread = Switch.from_db(switch_name)
         if not switch:
             data = {'status': 'error', 'resource': 'switch',
                     'description': "Switch {} not found".format(switch_name)}
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=data)
         else:
-            return switch[0].model_dump()
+            thread.join()
+            return switch.model_dump()
     except Exception:
         logger.error(traceback.format_exc())
         data = {'status': 'error', 'resource': 'switch',
