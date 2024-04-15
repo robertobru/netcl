@@ -19,4 +19,5 @@ app.include_router(device_api_router)
 app.include_router(net_api_router)
 app.include_router(operation_router)
 
+# Server ip address and port address should be defined in config.json file
 uvicorn.run(app, host=server_ip_address, port=server_port_number)
