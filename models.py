@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, IPvAnyInterface, IPvAnyNetwork, IPvAnyAdd
 from netdevice import Device
 from utils import persistency
 import networkx as nx
+from server_implementation import server_floating_address, server_port_number
 
 
 _db = persistency.DB()
@@ -63,7 +64,7 @@ class WorkerMsg(BaseModel):
 
     def produce_rest_answer_202(self) -> RestAnswer202:
         self.to_db()
-        return RestAnswer202.model_validate({'links': [{'href': '/operation/{}'.format(self.operation_id)}]})
+        return RestAnswer202.model_validate({'links': [{'href': '{}:{}/v1/api/operation/{}'.format(server_floating_address, server_port_number, self.operation_id)}]})
 
     def to_db(self) -> None:
         if _db.exists_DB("operations", {'operation_id': self.operation_id}):
