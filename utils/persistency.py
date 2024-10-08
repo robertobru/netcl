@@ -37,7 +37,6 @@ class DB:
     @staticmethod
     def update_DB(table, data, filter):
         db = OSSdb[table]
-        # for i in db.find(filter):
         db.update_one(filter, {"$set": data}, upsert=True)
 
     @staticmethod

@@ -2,11 +2,6 @@
   "mongodb": {
     "host": "127.0.0.1",
     "port": 27017,
-    "db": "nfvcl"
-  },
-  "uvicorn": {
-    "host": "127.0.0.1",
-    "floating_ip": "127.0.0.1",
-    "port": 8000
+    "db": "netcl"
   }
 }

@@ -1,0 +1,16 @@
+Value AS (\d+)
+Value Vrf (\S+)
+Value List importedVrf (\S+)
+Value List RouteType (\w+)
+
+Start
+ ^router bgp ${AS}( vrf ${Vrf})? -> RouterBGPSection
+
+RouterBGPSection
+ ^\s+address-family ipv4 unicast -> AddressFamilyIPv4Unicast
+ ^exit -> Record Start
+
+AddressFamilyIPv4Unicast
+ ^\s+import vrf ${importedVrf} -> Continue
+ ^\s+redistribute ${RouteType} -> Continue
+ ^\s+exit-address-family -> RouterBGPSection

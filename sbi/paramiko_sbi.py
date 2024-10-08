@@ -6,9 +6,11 @@ from utils import create_logger
 from netdevice import Device
 from switch.switch_base import SwitchNotConnectedException, SwitchNotAuthenticatedException, \
     SwitchConfigurationException
+import logging
 
-logger = create_logger('netmiko_driver')
-
+logger = create_logger('paramiko_driver')
+# logging.basicConfig()
+# logging.getLogger("paramiko").setLevel(logging.DEBUG)
 
 class ParamikoSbi:
     _ssh_session = None

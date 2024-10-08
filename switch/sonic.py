@@ -1,6 +1,6 @@
 import json
 
-from sbi.paramiko import ParamikoSbi
+from sbi.paramiko_sbi import ParamikoSbi
 from .switch_base import Switch
 from models import LldpNeighbor, PhyPort, VlanL3Port, Vrf, SwitchRequestVlanL3Port
 from ipaddress import IPv4Network

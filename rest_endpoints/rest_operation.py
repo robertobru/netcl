@@ -1,5 +1,5 @@
 from fastapi import APIRouter, status, HTTPException
-from models import WorkerMsg
+from network.nbi_msg_models import WorkerMsg
 from typing import List, Dict, Union
 from utils import persistency, create_logger
 from network import net_worker

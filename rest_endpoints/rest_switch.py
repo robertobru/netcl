@@ -1,5 +1,6 @@
 from fastapi import APIRouter, status, HTTPException
-from models import SwitchMsg, DelSwitchMsg, RestAnswer202, SwitchDataModel
+from models import SwitchDataModel
+from network.nbi_msg_models import RestAnswer202, AddSwitchRequestMsg, DelSwitchRequestMsg
 from switch import Switch
 from typing import List, Dict, Literal
 from netdevice import Device
@@ -60,7 +61,7 @@ async def get_switch_list() -> List[SwitchListItem]:
 async def onboard_switch(msg: Device) -> RestAnswer202:
     try:
         logger.info('received add switch msg: {}'.format(msg.model_dump()))
-        worker_msg = SwitchMsg(**msg.model_dump(), operation='add_switch')
+        worker_msg = AddSwitchRequestMsg(**msg.model_dump(), operation='add_switch')
         net_worker.send_message(worker_msg)
         # reply with submitted code
         return worker_msg.produce_rest_answer_202()
@@ -81,7 +82,7 @@ async def del_switch(switch_name: str) -> RestAnswer202:
                     'description': "Switch {} not found".format(switch_name)}
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=data)
 
-        worker_msg = DelSwitchMsg.model_validate({'operation': 'del_switch', 'switch': switch})
+        worker_msg = DelSwitchRequestMsg.model_validate({'operation': 'del_switch', 'switch': switch})
         net_worker.send_message(worker_msg)
         return worker_msg.produce_rest_answer_202()
     except Exception:

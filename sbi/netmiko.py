@@ -1,10 +1,12 @@
 from typing import List, Union, Any
 import netmiko
 from tenacity import retry, stop_after_attempt, retry_if_exception_type
+import textfsm
 from utils import create_logger
 from netdevice import Device
 from switch.switch_base import SwitchNotConnectedException, SwitchNotAuthenticatedException, \
     SwitchConfigurationException
+import traceback
 
 logger = create_logger('netmiko_driver')
 
@@ -41,8 +43,36 @@ class NetmikoSbi:
         except netmiko.exceptions.ReadTimeout:
             logger.error('ReadTimeout in authentication')
             raise SwitchNotConnectedException()
+        except Exception as e:
+            traceback.print_stack()
 
-    @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
+    @retry(
+        retry=retry_if_exception_type(Union[SwitchNotConnectedException, textfsm.parser.TextFSMError]),
+        stop=stop_after_attempt(3),
+        reraise=True
+    )
+    def send_config(self, commands: List[str]):
+        logger.debug("config command: {}".format(commands))
+        try:
+            res = self._netmiko_session.send_config_set(commands, read_timeout=45)
+            logger.debug("received output {}".format(res))
+            if self._netmiko_session.device_type == 'hp_comware' and "\'^\' position" in res:
+                raise ValueError("Error in commandline operations: {}".format(res))
+        except netmiko.exceptions.NetmikoTimeoutException:
+            logger.error("TimeoutException")
+            raise SwitchNotConnectedException()
+        except netmiko.exceptions.ReadTimeout:
+            logger.error("ReadTimeout")
+            raise SwitchNotConnectedException()
+        except netmiko.exceptions.AuthenticationException:
+            logger.error("AuthenticationException")
+            raise SwitchNotAuthenticatedException()
+
+    @retry(
+        retry=retry_if_exception_type(Union[SwitchNotConnectedException, textfsm.parser.TextFSMError]),
+        stop=stop_after_attempt(3),
+        reraise=True
+    )
     def send_command(self, commands: List[str], enable=True) -> List:
         logger.debug("send command: {}".format(commands))
         try:
@@ -65,7 +95,9 @@ class NetmikoSbi:
         except netmiko.exceptions.AuthenticationException:
             logger.error("AuthenticationException")
             raise SwitchNotAuthenticatedException()
-
+        except textfsm.parser.TextFSMError:
+            logger.warning(traceback.format_stack())
+            return self.send_command(commands, enable)
     @retry(retry=retry_if_exception_type(SwitchNotConnectedException), stop=stop_after_attempt(3), reraise=True)
     def get_info(self, command: str, use_textfsm: bool = True, enable=False) -> Union[dict[str, Any], str, list]:
         logger.debug("getting info command: {}".format(command))

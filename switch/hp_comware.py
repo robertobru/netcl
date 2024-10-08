@@ -1,18 +1,33 @@
+import random
+
 from sbi.netmiko import NetmikoSbi
 from .switch_base import Switch
-from models import SwitchRequestVlanL3Port, LldpNeighbor, PhyPort, VlanL3Port, Vrf
+from models import SwitchRequestVlanL3Port, LldpNeighbor, PhyPort, VlanL3Port, Vrf, VrfRequest, \
+    IpV4Route, RoutingProtocols, BGPRoutingProtocol, BGPNeighbor, BGPAddressFamily, BGPRedistribute
 import textfsm
 import ipaddress
 from pydantic import IPvAnyInterface, IPvAnyAddress
 from netaddr import IPAddress, IPNetwork
 from utils import create_logger
-from typing import List, Literal
+from typing import List, Literal, Any, Callable, Tuple
 
 logger = create_logger('hp_comware')
 
 
 class HpComware(Switch):
     _sbi_driver: NetmikoSbi = None
+
+    def send_cmd_and_save(func: Callable[..., List[Any]]) -> Callable[..., List[Any]]:
+        def wrapper(self, *args, **kwargs) -> List[Any]:
+            cmds = func(self, *args, **kwargs)
+            if not isinstance(cmds, list):
+                raise TypeError("The decorated function must return a list of str.")
+            if 'save' not in cmds[-1]:
+                cmds.append('save force')
+            res = self._sbi_driver.send_config(commands=cmds)
+            return res
+
+        return wrapper
 
     def _reinit_sbi_drivers(self) -> None:
         if not self._sbi_driver:
@@ -21,16 +36,13 @@ class HpComware(Switch):
     def _retrieve_info(self) -> None:
         logger.info('retrieving information for switch {}'.format(self.name))
         self.reinit_sbi_drivers()
-        self.retrieve_config()
-        self.parse_config()
-        self.retrieve_runtime_ports()
-        self.retrieve_neighbors()
-        logger.info('retrieved all the information for switch {}'.format(self.name))
+        self._update_info()
 
     def _update_info(self):
         self.retrieve_config()
         self.parse_config()
         self.retrieve_runtime_ports()
+        self.retrieve_bgp_peer_status()
         self.retrieve_neighbors()
         logger.info('retrieved all the information for switch {}'.format(self.name))
 
@@ -41,13 +53,14 @@ class HpComware(Switch):
         interface = None
         if shortname[:2] == 'GE':
             interface = next(
-                (item for item in self.phy_ports if item.index == 'GigabitEthernet' + shortname[2:]), None)
-        if shortname[:3] == 'XGE':
+                (item for item in self.phy_ports if item.index == 'GigabitEthernet{}'.format(shortname[2:])), None)
+        elif shortname[:3] == 'XGE':
             interface = next(
-                (item for item in self.phy_ports if item.index == 'Ten-GigabitEthernet' + shortname[3:]), None)
-        if shortname[:3] == 'FGE':
-            interface = next((item for item in self.phy_ports if item.index == 'FortyGigE' + shortname[3:]), None)
-        if shortname[:4] == 'M-GE':
+                (item for item in self.phy_ports if item.index == 'Ten-GigabitEthernet{}'.format(shortname[3:])), None)
+        elif shortname[:3] == 'FGE':
+            interface = next(
+                (item for item in self.phy_ports if item.index == 'FortyGigE{}'.format(shortname[3:])), None)
+        elif shortname[:4] == 'M-GE':
             interface = next(
                 (item for item in self.phy_ports if item.index == 'M-GigabitEthernet' + shortname[4:]), None)
         if not interface:
@@ -76,9 +89,92 @@ class HpComware(Switch):
             elif r[3][0] == 'H':
                 interface.duplex = 'HALF'
 
+    def retrieve_bgp_peer_status(self):
+
+        for vrf in self.vrfs:
+            if vrf.protocols and vrf.protocols.bgp:
+                res = self._sbi_driver.get_info(
+                    "display bgp peer ipv4 vpn-instance {}".format(vrf.name), use_textfsm=False)
+                fsm = textfsm.TextFSM(open("fsm_templates/hp_comware_bgp_peer_template"))
+                parsed_res = fsm.ParseText(res)
+                for peer in parsed_res:
+                    if peer[1] and peer[2]:
+                        if not vrf.protocols.bgp.router_id:
+                            vrf.protocols.bgp.router_id = peer[0]
+                        configured_peer = next(
+                            item for item in vrf.protocols.bgp.neighbors if
+                                str(item.ip) == str(peer[1]) and int(item.remote_as) == int(peer[2])
+                        )
+                        configured_peer.msgrcvd = int(peer[3])
+                        configured_peer.msgsent = int(peer[4])
+                        configured_peer.outq = int(peer[5])
+                        configured_peer.prefrcv = int(peer[6])
+                        configured_peer.updowntime = peer[7]
+                        configured_peer.status = peer[8].lower()
+
     def retrieve_config(self) -> None:
         _config = self._sbi_driver.get_info("display current-configuration")
         self.store_config(_config)
+
+    def parse_bgp_config(self) -> None:
+        config_to_parse = self.last_config.config
+        local_as = None
+        in_bgp_section = False
+        parsing_vrf = None
+        switch_vrf = None
+        parsing_address_family = None
+        default_vrf = next((item for item in self.vrfs if item.name == 'default'), None)
+        default_address_family = None
+
+        for line in config_to_parse.splitlines():
+            if line.startswith('bgp') and not in_bgp_section:
+                in_bgp_section = True
+                local_as = line.split()[1]
+                if not default_vrf.protocols:
+                    default_vrf.protocols = RoutingProtocols()
+                if not default_vrf.protocols.bgp:
+                    default_vrf.protocols.bgp = BGPRoutingProtocol(as_number=local_as)
+            elif line.startswith(' peer'):  # peer of default Vrf
+                peer = line.split()
+                default_vrf.protocols.bgp.neighbors.append(
+                    BGPNeighbor(ip=IPvAnyAddress(peer[1]), remote_as=int(peer[3])))
+            elif line.startswith(' address-family'):  # address family of default Vrf
+                af_line = line.split()
+                default_address_family = BGPAddressFamily(protocol=af_line[1], type=af_line[2], redistribute=[],
+                                                          imports=[])
+                default_vrf.protocols.bgp.address_families.append(default_address_family)
+            elif line.startswith('  import-route'):  # import route of default vrf
+                parsed_route_type = line.split()[1]
+                redistributed = BGPRedistribute.connected if parsed_route_type == 'direct' else parsed_route_type
+                default_address_family.redistribute.append(redistributed)
+            elif line.startswith(' ip vpn-instance'):  # enter into vpn-instance
+                parsing_vrf = line.split()[2]
+                switch_vrf = next(item for item in self.vrfs if item.name == parsing_vrf)
+                if not switch_vrf.protocols:
+                    switch_vrf.protocols = RoutingProtocols()
+                if not switch_vrf.protocols.bgp:
+                    switch_vrf.protocols.bgp = BGPRoutingProtocol(as_number=local_as)
+
+            elif parsing_vrf and len(line) > 1 and line[1] != ' ':  # exit from vpn-instance
+                if parsing_address_family:
+                    parsing_address_family = None
+                parsing_vrf = None
+
+            elif parsing_vrf and line.startswith('  peer'):  # identify peers in vpn-instance
+                peer = line.split()
+                switch_vrf.protocols.bgp.neighbors.append(BGPNeighbor(ip=IPvAnyAddress(peer[1]), remote_as=int(peer[3])))
+
+            elif line.startswith('  address-family'):  # identify address families in vpn-instance
+                protocol = line.split()[1]
+                protocol_type = line.split()[2]
+                parsing_address_family = BGPAddressFamily(protocol=protocol, type=protocol_type, redistribute=[], imports=[])
+                switch_vrf.protocols.bgp.address_families.append(parsing_address_family)
+            elif parsing_address_family and len(line) > 2 and line[2] != ' ':
+                parsing_address_family = None
+            elif parsing_address_family and line.startswith('   import-route'):
+                parsed_route_type = line.split()[1]
+                redistributed = BGPRedistribute.connected if parsed_route_type == 'direct' else parsed_route_type
+                parsing_address_family.redistribute.append(redistributed)
 
     def parse_config(self) -> None:
         fsm = textfsm.TextFSM(open("fsm_templates/hp_comware_config_template"))
@@ -116,7 +212,7 @@ class HpComware(Switch):
                             raise ValueError('error in parsing trunk vlans')
 
                     vlan_mode = r[1] if r[1] else 'ACCESS'
-
+                    logger.debug('adding phy port {}'.format(r[0]))
                     self.phy_ports.append(PhyPort(
                         index=r[0],
                         name=r[0],
@@ -166,10 +262,22 @@ class HpComware(Switch):
                     )
                 )
 
+        # adding the default vrf
+        default_vrf = Vrf(
+            name="default",
+            rd="default",
+            ports=[]
+        )
+        self.vrfs.append(default_vrf)
         for vlan_interface in self.vlan_l3_ports:
             if vlan_interface.vrf:
-                vrf_obj = next(item for item in self.vrfs if item.name == vlan_interface.vrf)
-                vrf_obj.ports.append(vlan_interface)
+                vrf_obj = next((item for item in self.vrfs if item.name == vlan_interface.vrf), None)
+                if vrf_obj:
+                    vrf_obj.ports.append(vlan_interface)
+                else:  # it means it is bound to the default Vrf
+                    default_vrf.ports.append(vlan_interface)
+
+        self.parse_bgp_config()
 
     def retrieve_neighbors(self) -> None:
         _neighbors = self._sbi_driver.get_info("display lldp neighbor-information list", use_textfsm=True)
@@ -179,7 +287,18 @@ class HpComware(Switch):
             interface.neighbor = LldpNeighbor(neighbor=n['neighbor'], remote_interface=n['neighbor_interface'])
             logger.debug('interface {} neighbours: {}, remote port {}'.format(interface.index, n['neighbor'],
                                                                               n['neighbor_interface']))
+    """def retrieve_bgp_neighbors(self):
+        for vrf in self.vrfs:
+            parsing_peers = self._sbi_driver.get_info(
+                "display bgp peer ipv4 vpn-instance {}".format(vrf.name), use_textfsm=True)
+            for p in parsing_peers:
+                logger.warn(p)
+                switch_peer = next(item for item in vrf.protocols.bgp.neighbors
+                                   if item.ip == p[1] and item.remote_as == p[2])
+                switch_peer.msgrcvd = p[3]
+                switch_peer.msgsent = p[4]"""
 
+    @send_cmd_and_save
     def _add_vlan(self, vlan_ids: List[int]):
         """
         Add vlans to the hp-comware switch
@@ -197,11 +316,9 @@ class HpComware(Switch):
         for vlan_id in vlan_ids:
             vlan_create_cmd.extend([f'vlan {vlan_id}', f'name vlan {vlan_id}', f'description vlan {vlan_id}'])
 
-        # send commands to the swicth
-        res = self._sbi_driver.send_command(commands=vlan_create_cmd, enable=True)
+        return vlan_create_cmd
 
-        return res
-
+    @send_cmd_and_save
     def _del_vlan_itf(self, vlan_id: int):
         """
         Delete vlans interface from the hp-comware switch
@@ -214,12 +331,9 @@ class HpComware(Switch):
             raise ValueError('no vlan interface for vlan id {}'.format(vlan_id))
 
         vlan_delete_cmd = ["undo interface Vlan-interface {}".format(vlan_id)]
+        return vlan_delete_cmd
 
-        # send commands to the swicth
-        res = self._sbi_driver.send_command(commands=vlan_delete_cmd, enable=True)
-        return res
-
-
+    @send_cmd_and_save
     def _del_vlan(self, vlan_ids: List[int]):
         """
         Delete vlans from the hp-comware switch
@@ -236,11 +350,9 @@ class HpComware(Switch):
         else:
             for vlan_id in vlan_ids:
                 vlan_delete_cmd.extend([f'undo vlan {vlan_id}'])
+        return vlan_delete_cmd
 
-        # send commands to the swicth
-        res = self._sbi_driver.send_command(commands=vlan_delete_cmd, enable=True)
-        return res
-
+    @send_cmd_and_save
     def _add_vlan_to_port(self, vlan_id: int, port: PhyPort, pvid: bool = False) -> bool:
         """
         Configure VLAN settings for a given interface type.
@@ -289,11 +401,9 @@ class HpComware(Switch):
             f'description set for VLAN {vlan_id}',
         ]
         commands_list = set_vlan_port + set_port_type_and_vlan
+        return commands_list
 
-        # send commands to the swicth
-        res = self._sbi_driver.send_command(commands=commands_list, enable=True)
-        return res
-
+    @send_cmd_and_save
     def _del_vlan_to_port(self, vlan_ids: List[int], port: PhyPort):
         """
         Delete vlans from the port ACCESS TRUNK HYBRID
@@ -333,10 +443,10 @@ class HpComware(Switch):
                 ])
         else:
             raise ValueError("PhyPort has no interface mode specified!")
-        # send commands to the swicth
-        res = self._sbi_driver.send_command(commands=commands_list, enable=True)
-        return res
 
+        return commands_list
+
+    @send_cmd_and_save
     def _set_port_mode(self, port: PhyPort, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']):
         """
         Set the interface mode (ACCESS, TRUNK, or HYBRID) for the given PhyPort object.
@@ -367,9 +477,9 @@ class HpComware(Switch):
         else:
             raise ValueError("PhyPort has no interface mode specified!")
         # send commands to the switch
-        res = self._sbi_driver.send_command(commands=commands_list, enable=True)
-        return res
+        return commands_list
 
+    @send_cmd_and_save
     def _bind_vrf(self, vrf1: Vrf, vrf2: Vrf) -> bool:
         """
         Binds two Virtual Routing and Forwarding (VRF) instances by configuring VPN targets
@@ -390,7 +500,7 @@ class HpComware(Switch):
         # configure vpn-target for vrf1 import-extcommunity
         [vrf1.rd_import.append(vrf2_rd) for vrf2_rd in vrf2.rd_export if vrf2_rd not in vrf1.rd_import]
         [vrf1_conf_cmds.append(f"vpn-target {rd_import} import-extcommunity") for rd_import in vrf1.rd_import]
-
+        vrf1_conf_cmds.append(f"quit")
         # configure vpn-target for vrf2 export-extcommunity
         if vrf2.rd not in vrf2.rd_export:
             vrf2.rd_export.append(vrf2.rd)
@@ -400,12 +510,12 @@ class HpComware(Switch):
         # configure vpn-target for vrf2 import-extcommunity
         [vrf2.rd_import.append(vrf1_rd) for vrf1_rd in vrf1.rd_export if vrf1_rd not in vrf2.rd_import]
         [vrf2_conf_cmds.append(f"vpn-target {rd_import} import-extcommunity") for rd_import in vrf2.rd_import]
+        vrf2_conf_cmds.append(f"quit")
 
         commands_list = vrf1_conf_cmds + vrf2_conf_cmds
-        res = self._sbi_driver.send_command(commands=commands_list, enable=True)
+        return commands_list
 
-        return res
-
+    @send_cmd_and_save
     def _unbind_vrf(self, vrf1: Vrf, vrf2: Vrf) -> bool:
         """
         Unbinds two VRFs instances by configuring VPN targets for import of extcommunity attributes.
@@ -435,11 +545,9 @@ class HpComware(Switch):
         if not commands_list:
             print("No commands to execute. VRFs are already unbound.")
             return True
+        return commands_list
 
-        res = self._sbi_driver.send_command(commands=commands_list, enable=True)
-        print(commands_list)
-        return res
-
+    @send_cmd_and_save
     def _add_vlan_to_vrf(self, vrf: Vrf, vlan_interface: SwitchRequestVlanL3Port) -> bool:
         """
         Creates a VLAN interface and associates it with a specified VRF (VPN instance).
@@ -462,21 +570,21 @@ class HpComware(Switch):
             f'vlan {vlan_interface.vlan}',
             # f'name vlan connected to vlaninterface {VlanL3Port.ipaddress}',
             # f'description vlan connected to vrf {Vrf.name}',
+            f'quit'
         ]
         # Bind vlan-interface to the vrf
         add_vlan_interface_to_vpn_instance_cmd = [
-            f'interface Vlan-interface {vlan_interface.vlan}',
+            f'interface Vlan-interface{vlan_interface.vlan}',
             f'ip binding vpn-instance {vrf.name}',
-            f'ip address {str(ipaddress.IPv4Interface(str(vlan_interface.ipaddress)).ip)} {netmask}'
+            f'ip address {str(ipaddress.IPv4Interface(str(vlan_interface.ipaddress)).ip)} {netmask}',
+            f'quit'
         ]
         # add vrf name to vlan_interface
         vlan_interface.vrf = vrf.name
         command_list = create_vlan_cmd + add_vlan_interface_to_vpn_instance_cmd
+        return command_list
 
-        # send commands to the swicth
-        res = self._sbi_driver.send_command(commands=command_list, enable=True)
-        return res
-
+    @send_cmd_and_save
     def _del_vlan_to_vrf(self, vrf: Vrf, vlan_interface: VlanL3Port) -> bool:
         """
         Deletes a VLAN interface and removes it from a specified VRF (VPN instance).
@@ -499,9 +607,106 @@ class HpComware(Switch):
         ]
         # remove vrf name from vlan_interface
         vlan_interface.vrf = ""
-        # send commands to the swicth
-        res = self._sbi_driver.send_command(commands=command_list, enable=True)
-        return res
+        return command_list
+
+    @send_cmd_and_save
+    def _add_vrf(self, vrf: VrfRequest) -> Tuple[List[str], NetmikoSbi]:
+        if not vrf.rd:
+            vrf.rd = self.get_new_rd()
+
+        as_number = vrf.protocols.bgp.as_number if vrf.protocols.bgp else 1000
+        command_list = [
+            "ip vpn-instance {}".format(vrf.name),
+                "description {}".format(vrf.description),
+                "route-distinguisher {}".format(vrf.rd),
+            "quit",
+            "bgp {}".format(as_number),
+                "ip vpn-instance {}".format(vrf.name),
+                    "ipv4-family unicast",
+                        "import-route direct",
+                        "import-route static",
+                    "quit",
+                "quit",
+            "quit"
+        ]
+        return command_list, self._sbi_driver
+
+    def get_new_rd(self):
+        allocated_rds = [item.rd for item in self.vrfs]
+        rd = random.randint()
+        while rd in allocated_rds:
+            rd = random.randint()
+        return "{}:00".format(rd)
+
+    @send_cmd_and_save
+    def _del_vrf(self, vrf: Vrf) -> Tuple[List[str], NetmikoSbi]:
+        command_list = [
+            "undo ip vpn-instance {}".format(vrf.name)
+        ]
+        return command_list, self._sbi_driver
+
+    @send_cmd_and_save
+    def _add_static_route(self, route: IpV4Route, vrf_name: str ='default') -> Tuple[List[str], NetmikoSbi]:
+        vpn_instance = "" if vrf_name == 'default' else "vpn-instance {} ".format(vrf_name)
+        prefix, mask = route.get_prefix_and_prefixlen()
+        command_list = [
+            "ip route-static {}{} {} {} permanent".format(vpn_instance, prefix, mask, route.nexthop)
+        ]
+        return command_list, self._sbi_driver
+
+    @send_cmd_and_save
+    def _del_static_route(self, route: IpV4Route, vrf_name: str ='default') -> Tuple[List[str], NetmikoSbi]:
+        vpn_instance = "" if vrf_name == 'default' else "vpn-instance {} ".format(vrf_name)
+        prefix, mask = route.get_prefix_and_prefixlen()
+        command_list = [
+            "undo ip route-static {}{} {}".format(vpn_instance, prefix, mask)
+        ]
+        return command_list, self._sbi_driver
+
+    @send_cmd_and_save
+    def _add_bgp_instance(self, vrf_msg: VrfRequest):
+        as_number = vrf_msg.protocols.bgp.as_number if vrf_msg.protocols.bgp else 1000
+        command_list = [
+            "bgp {}".format(as_number)
+        ]
+        if vrf_msg.name != "default":
+            command_list.append("ip vpn-instance {}".format(vrf_msg.name))
+            for peer in vrf_msg.protocols.bgp.neighbors:
+                if peer not in self.get_bgp_peers():
+                    command_list.append("peer {} as-number {}".format(peer.ip, peer.remote_as))
+                    if peer.ip_source:
+                        l3_interface = next(item for item in self.vlan_l3_ports if item.ipaddress == peer.ip_source)
+                        command_list.append("peer {} connect-interface {}".format(peer.ip, l3_interface.name))
+            for family in vrf_msg.protocols.bgp.address_families:
+                if family.protocol == 'ipv4':
+                    if vrf_msg.protocols.bgp.address_families == 'ipv4':
+                        command_list.append("ipv4-family {}".format(family.protocol_type))
+                        if 'connected' in family.redistribute:
+                            command_list.append("import-route direct")
+                        if 'static' in family.redistribute:
+                            command_list.append("import-route static")
+                    command_list("quit")  # exit from current family
+            for peer in vrf_msg.protocols.bgp.neighbors:
+                command_list.append("peer {} enable".format(peer.ip))
+        if vrf_msg.name != "default":
+            command_list.append("quit")  # exit from ip vpn-instance VRF_NAME
+        command_list.append("quit")  # exit from bgp AS_NUMBER
+        return command_list
+
+    @send_cmd_and_save
+    def _del_bgp_instance(self, vrf_name: str):
+        command_list = []
+        vrf = next(item for item in self.vrfs if item.name == vrf_name)
+        if vrf.name == "default":
+            command_list.append("undo bgp {}".format(vrf.protocols.bgp.as_number))
+        else:
+            command_list.append("bgp {}".format(vrf.protocols.bgp.as_number))
+            command_list.append("undo ip vpn-instance {}".format(vrf.name))
+            command_list.append("quit")
+        for peer in self.get_bgp_peers():
+            if peer not in self.get_bgp_peers(exclude=vrf.name):
+                command_list.append("undo peer {} as-number {}".format(peer.ip, peer.remote_as))
+        return command_list
 
     def commit_and_save(self):
         """

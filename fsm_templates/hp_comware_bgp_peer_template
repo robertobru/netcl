@@ -1,0 +1,17 @@
+Value Filldown RouterId (\S+)
+Value PeerIp (\S+)
+Value AsNumber (\d+)
+Value MsgRcvd (\d+)
+Value MesgSent (\d+)
+Value OutQ (\d+)
+Value PrefRcv (\d+)
+Value TimeUp (\S+)
+Value State (\S+)
+
+Start
+ ^\s+BGP local router ID: ${RouterId}
+ ^\s+\* - Dynamically created peer
+ ^\s+Peer\s+AS\s+MsgRcvd\s+MsgSent\s+OutQ\s+PrefRcv\s+Up/Down\s+State
+ ^\s+${PeerIp}\s+${AsNumber}\s+${MsgRcvd}\s+${MesgSent}\s+${OutQ}\s+${PrefRcv}\s+${TimeUp}\s+${State} -> Record
+
+

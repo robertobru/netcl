@@ -1,9 +1,8 @@
 from __future__ import annotations  # needed to annotate class methods returning instances
-from netdevice import Device
-from models import SwitchRequestVlanL3Port, ConfigItem, LldpNeighbor, PhyPort, VlanL3Port, Vrf, SwitchDataModel
+from models import *
 import abc
 import json
-from typing import List, Literal, Union, Tuple
+from typing import List, Union, Tuple
 import traceback
 from importlib import import_module
 from utils import persistency, create_logger
@@ -34,6 +33,12 @@ class SwitchConfigurationException(Exception):
 
 
 class Switch(SwitchDataModel):
+
+    def __eq__(self, other: Switch):
+        return self.name == other.name and \
+               self.phy_ports == other.phy_ports and \
+               self.vlans == other.vlans and self.vrfs == other.vrfs
+
 
     def retrieve_info(self):
         self.vlan_l3_ports = []
@@ -113,20 +118,24 @@ class Switch(SwitchDataModel):
             logger.error(traceback.format_exc())
             raise ValueError('re-initialization for switch {} failed'.format(device_name))
 
-    def to_db(self) -> None:
-        if _db.exists_DB("switches", {'name': self.name}):
-            _db.update_DB("switches", json.loads(self.to_switch_model().model_dump_json()), {'name': self.name})
+    def to_db(self, backup: bool =False) -> None:
+        if backup:
+            collection = 'lastconfig'
         else:
-            _db.insert_DB("switches", json.loads(self.to_switch_model().model_dump_json()))
+            collection = 'switches'
+
+        if _db.exists_DB(collection, {'name': self.name}):
+            _db.update_DB(collection, json.loads(self.to_switch_model().model_dump_json()), {'name': self.name})
+        else:
+            _db.insert_DB(collection, json.loads(self.to_switch_model().model_dump_json()))
+
+
 
     def destroy(self):
         _db.delete_DB("switches", {'name': self.name})
 
     def to_switch_model(self):
         return Switch.model_validate(self, from_attributes=True)
-
-    def to_device_model(self) -> Device:
-        return Device.model_validate(self, from_attributes=True)
 
     def check_status(self):
         return True if self.state == 'ready' else False
@@ -170,6 +179,9 @@ class Switch(SwitchDataModel):
         except StopIteration:
             logger.error("Port {} not found".format(port_name))
             return None
+
+    def get_vlaninterface_from_vid(self, vid: int) -> VlanL3Port:
+        return next((item for item in self.vlan_l3_ports if item.vlan == vid), None)
 
     def add_vlan(self, vlan_ids: List[int]) -> bool:
         # add only vlans not already configured in the switch
@@ -219,7 +231,8 @@ class Switch(SwitchDataModel):
     def get_vlans(self) -> List[int]:
         return self.vlans
 
-    def set_port_mode(self, port_name: str, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']):
+
+    def set_port_mode(self, port_name: str, port_mode: LinkModes):
         port = self.get_port_by_name(port_name)
         if port_mode == port.mode:
             logger.warning("Port {} is already in {} mode".format(port.index, port_mode))
@@ -227,10 +240,10 @@ class Switch(SwitchDataModel):
         return self._set_port_mode(port, port_mode)
 
     @abc.abstractmethod
-    def _set_port_mode(self, port: PhyPort, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK']) -> bool:
+    def _set_port_mode(self, port: PhyPort, port_mode: LinkModes) -> bool:
         pass
 
-    def add_vlan_to_port(self, vlan_id: int, port_name: str, port_mode: Literal['ACCESS', 'HYBRID', 'TRUNK'] = 'TRUNK',
+    def add_vlan_to_port(self, vlan_id: int, port_name: str, port_mode: LinkModes = LinkModes.trunk,
                          pvid: bool = False) -> bool:
         port = self.get_port_by_name(port_name)
         if not port:
@@ -241,14 +254,18 @@ class Switch(SwitchDataModel):
         if vlan_id not in self.vlans:
             logger.warn("vlan {} not found, adding to the switch vlans")
             self.add_vlan([vlan_id])
-        return self._add_vlan_to_port(vlan_id, port, pvid)
+        if not pvid and vlan_id not in port.trunk_vlans:
+            return self._add_vlan_to_port(vlan_id, port, pvid)
+        elif pvid and vlan_id != port.access_vlan:
+            return self._add_vlan_to_port(vlan_id, port, pvid)
+        else:
+            return False
 
     @abc.abstractmethod
     def _add_vlan_to_port(self, vlan_id: int, port: PhyPort, pvid: bool = False) -> bool:
         pass
 
-    def del_vlan_to_port(self, vlan_ids: List[int], port_name: str, port_mode: Literal['ACCESS', 'TRUNK'] = 'TRUNK') \
-            -> bool:
+    def del_vlan_to_port(self, vlan_ids: List[int], port_name: str, port_mode: LinkModes = LinkModes.trunk) -> bool:
         port = self.get_port_by_name(port_name)
         if not port:
             return False
@@ -366,6 +383,68 @@ class Switch(SwitchDataModel):
             raise ValueError('Vlan interface with vlan id {} is not associated to the vrf {} in switch {}'.format(
                 vlan_id, vrf_name, self.name))
         return self._del_vlan_to_vrf(selected_vrf, vlan_interface)
+
+    def add_vrf(self, vrf_msg: VrfRequest):
+        if vrf_msg.name in [item.name for item in self.vrfs]:
+            raise ValueError("VRF {} already existing in switch {}. Vrf creation aborted.".format(
+                vrf_msg.name, self.name))
+        self._add_vrf(vrf_msg)
+
+    def set_vrf_routing(self, vrf: Vrf, vrf_msg: VrfRequest):
+        if vrf_msg.protocols:
+            if vrf_msg.protocols.bgp:
+                self._add_bgp_instance(vrf_msg)
+            if vrf_msg.protocols.static:
+                for route in vrf_msg.protocols.static.routes:
+                    self.add_route(vrf, route)
+
+    def add_route(self, vrf: Vrf, route: IpV4Route):
+        if not vrf.protocols:
+            vrf.protocols = RoutingProtocols()
+        if not vrf.protocols.static:
+            vrf.protocols.static = StaticRoutingProtocol
+
+        self._add_route(vrf, route)
+
+    def del_route(self, vrf: Vrf, route: IpV4Route):
+        self._del_route(vrf, route)
+
+    @abc.abstractmethod
+    def _add_route(self, vrf: Vrf, route: IpV4Route):
+        pass
+
+    @abc.abstractmethod
+    def _del_route(self, vrf: Vrf, route: IpV4Route):
+        pass
+
+    def _add_bgp_instance(self, vrf_msg: VrfRequest):
+        raise ValueError('BGP Routing not supported in this switch OS')
+
+    def _del_bgp_instance(self, vrf_name: str):
+        raise ValueError('BGP Routing not supported in this switch OS')
+
+    def get_bgp_peers(self, exclude: str =None):
+        peers = []
+        for vrf in self.vrfs:
+            if vrf.protocols.bgp and exclude != vrf.name:
+                for vrf_peer in vrf.protocols.bgp.neighbors:
+                    if vrf_peer not in peers:
+                        peers.append(vrf_peer)
+        return peers
+
+    @abc.abstractmethod
+    def _add_vrf(self, vrf_msg: VrfRequest):
+        pass
+
+    def del_vrf(self, vrf_name: str):
+        vrf = next((item for item in self.vrfs if item.name == vrf_name), None)
+        if not vrf:
+            raise ValueError("Vrf {} not found on switch {}".format(vrf_name, self.name))
+        self._del_vrf(vrf_name)
+
+    @abc.abstractmethod
+    def _del_vrf(self, vrf_name: str):
+        pass
 
     @abc.abstractmethod
     def _del_vlan_to_vrf(self, vrf: Vrf, vlan_interface: VlanL3Port) -> bool:
