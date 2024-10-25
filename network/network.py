@@ -1,11 +1,10 @@
 from firewall.firewall_base import Firewall
 from models import *
 from network.nbi_msg_models import NetVlanMsg, PortToNetVlansMsg
-from network_base import _db, logger
-from network_graph import NetworkGraph
-from network_models import *
-from nbi_msg_models import AddPnfRequestMsg, DelPnfRequestMsg, AddRouteRequestMsg, DelRouteRequestMsg
-from networker import NetworkWorker
+from network.network_base import _db, logger
+from network.network_graph import NetworkGraph
+from network.network_models import *
+from network.nbi_msg_models import AddPnfRequestMsg, DelPnfRequestMsg, AddRouteRequestMsg, DelRouteRequestMsg
 
 
 class Network(NetworkGraph):
@@ -196,7 +195,7 @@ class Network(NetworkGraph):
         # selecting switch and vrf and then applying
         selected_vrf = self.vrf_switch.get_vrf_by_name(selected_vrf_name)
         res = self.vrf_switch.add_vlan_to_vrf(
-            selected_vrf, SwitchRequestVlanL3Port.from_netvlanmsg(msg, vrf_name=selected_vrf_name))
+            selected_vrf, msg.to_switch_request_vlan_l3port(vrf_name=selected_vrf_name))
         if res:
             self.vrf_switch.update_info()  # FixMe: put it in a thread?
         else:
@@ -450,5 +449,3 @@ class Network(NetworkGraph):
         else:
             _db.insert_DB('groups', data=_data)
 
-
-net_worker = NetworkWorker()

@@ -5,7 +5,6 @@ from switch.switch_base import Switch
 import networkx as nx
 from utils import create_logger
 from ipaddress import IPv4Network
-from network.nbi_msg_models import SetNetworkConfigRequestMsg
 from enum import Enum
 
 logger = create_logger('network')
@@ -34,7 +33,7 @@ class NetworkConfig(BaseModel):  # set config da sergio
     firewall_uplink_neighbor: LldpNeighbor = None
     firewall_port_group: str = 'projects'
 
-    @classmethod
+    """@classmethod
     def from_config_msg(cls, msg: SetNetworkConfigRequestMsg):
         def vlanpool_from_ranges(ranges: List[VlanRange]) -> List[int]:
             res = set()
@@ -59,7 +58,7 @@ class NetworkConfig(BaseModel):  # set config da sergio
             as_number=msg.as_number,
             firewall_uplink_vlan_port=msg.firewall_uplink_vlan_port,
             firewall_uplink_neighbor=msg.firewall_uplink_neighbor
-        )
+        )"""
 
 
 class NetworkGroupItem(BaseModel):
@@ -105,7 +104,7 @@ class PnfElement(NetworkGroupItem):
 
 
 class NetworkPnfs(NetworkGroups):
-    root: List[PnfElement]
+    root: List[PnfElement] = []
 
     def get(self, pnf_name: str):
         return next((item for item in self.root if item.name == pnf_name), None)

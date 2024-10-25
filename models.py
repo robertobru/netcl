@@ -7,7 +7,6 @@ from enum import Enum
 from ipaddress import IPv4Network
 from pydantic import BaseModel, Field, IPvAnyInterface, IPvAnyNetwork, IPvAnyAddress, ConfigDict
 from netdevice import Device
-from network.nbi_msg_models import NetVlanMsg
 from utils import persistency
 import networkx as nx
 
@@ -67,16 +66,6 @@ class FirewallRequestL3Port(BaseModel):
     vrf: str = 'default'
     description: str = ''
 
-    """@classmethod
-    def from_netvlanmsg(cls, msg: NetVlanMsg, vrf_name: str):
-        return (cls(
-            vlan=msg.vid,
-            ipaddress=msg.gateway,
-            cidr=msg.cidr,
-            vrf=vrf_name,
-            description=msg.description
-        ))"""
-
 
 class SwitchRequestVlanL3Port(BaseModel):
     # Used to create a new VLAN interface
@@ -86,7 +75,7 @@ class SwitchRequestVlanL3Port(BaseModel):
     vrf: str = ''
     description: str = ''
 
-    @classmethod
+    """@classmethod
     def from_netvlanmsg(cls, msg: NetVlanMsg, vrf_name: str):
         return (cls(
             vlan=msg.vid,
@@ -94,7 +83,7 @@ class SwitchRequestVlanL3Port(BaseModel):
             cidr=msg.cidr,
             vrf=vrf_name,
             description=msg.description
-        ))
+        ))"""
 
 
 class VlanL3Port(BaseModel):

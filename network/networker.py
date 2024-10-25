@@ -9,7 +9,7 @@ import networkx as nx
 from .nbi_msg_models import WorkerMsg
 from netdevice import Device
 from .network import Network
-from network_base import logger
+from .network_base import logger
 
 
 class NetworkWorker:

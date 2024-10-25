@@ -7,14 +7,14 @@ from datetime import datetime
 
 from typing import Union, List, Literal, Optional
 from uuid import uuid4
+from ipaddress import IPv4Network
 
-from pydantic import BaseModel, AnyHttpUrl, Field, IPvAnyNetwork, IPvAnyAddress, model_validator
-from pydantic.v1 import IPvAnyInterface
+from pydantic import BaseModel, AnyHttpUrl, Field, IPvAnyNetwork, IPvAnyAddress, IPvAnyInterface, model_validator
 
 from models import PollingOperationLinks, NetWorkerOperationType, NetWorkerOperationStates, _db, LldpNeighbor, \
-    NetVlanReport, IpV4Route
+    NetVlanReport, IpV4Route, SwitchRequestVlanL3Port
 from netdevice import Device
-from network.network_models import VlanRange
+from network.network_models import VlanRange, NetworkConfig
 
 
 class CallbackModel(BaseModel):
@@ -63,8 +63,10 @@ class WorkerMsg(BaseModel):
             # FIXME: implement callback
             pass
 
+
 class AddSwitchRequest(Device):
     pass
+
 
 class AddSwitchRequestMsg(WorkerMsg, Device):
     pass
@@ -73,6 +75,7 @@ class AddSwitchRequestMsg(WorkerMsg, Device):
 class DelSwitchRequestMsg(WorkerMsg):
     switch_name: str
 
+
 class AddPnfRequest(BaseModel):
     name: str
     switch_name: str
@@ -80,6 +83,7 @@ class AddPnfRequest(BaseModel):
     vid: Optional[int] = None
     ip_address: IPvAnyInterface
     ip_gateway: IPvAnyAddress
+
 
 class AddPnfRequestMsg(WorkerMsg, AddPnfRequest):
     pass
@@ -104,6 +108,7 @@ class DelRouteRequest(IpV4Route):
 class DelRouteRequestMsg(WorkerMsg, AddRouteRequest):
     pass
 
+
 class SetNetworkConfigRequestMsg(WorkerMsg):
     vrf_switch_name: str
     uplink_vlans_pools: List[VlanRange]
@@ -116,6 +121,32 @@ class SetNetworkConfigRequestMsg(WorkerMsg):
     as_number: int = 1000
     firewall_uplink_vlan_port: str = None
     firewall_uplink_neighbor: LldpNeighbor = None
+
+    def to_network_config(self) -> NetworkConfig:
+        def vlanpool_from_ranges(ranges: List[VlanRange]) -> List[int]:
+            res = set()
+            for _pool in ranges:
+                for _vlan in range(_pool.min, _pool.max):
+                    res.add(_vlan)
+            return list(res)
+
+        def ip_pool_from_ranges(ranges: List[IPvAnyNetwork], subnet_length: int) -> List[IPv4Network]:
+            res = []
+            for cidr in ranges:
+                res.extend(list(IPv4Network(str(cidr)).subnets(new_prefix=subnet_length)))
+            return res
+
+        return NetworkConfig(
+            vrf_switch_name=self.vrf_switch_name,
+            vrf_uplink_vlans=vlanpool_from_ranges(self.uplink_vlans_pools),
+            vrf_uplink_ip_pool=ip_pool_from_ranges(self.uplink_ipaddr_pool, self.uplink_ipnet_mask),
+            pnf_vlans_pool=vlanpool_from_ranges(self.pnf_vlans_pool),
+            pnf_merging_vrf_name=self.pnf_merging_vrf_name,
+            pnf_ip_pool=ip_pool_from_ranges(self.pnf_ip_pool, self.pnf_ipnet_mask),
+            as_number=self.as_number,
+            firewall_uplink_vlan_port=self.firewall_uplink_vlan_port,
+            firewall_uplink_neighbor=self.firewall_uplink_neighbor
+        )
 
 
 class NetVlan(CallbackRequest, NetVlanReport):
@@ -132,6 +163,15 @@ class NetVlan(CallbackRequest, NetVlanReport):
             if gateway_ip not in cidr_net:
                 raise ValueError('The gateway IP address does not match with the network CIDR')
             return self
+
+    def to_switch_request_vlan_l3port(self, vrf_name: str) -> SwitchRequestVlanL3Port:
+        return SwitchRequestVlanL3Port(
+            vlan=self.vid,
+            ipaddress=self.gateway,
+            cidr=self.cidr,
+            vrf=vrf_name,
+            description=self.description
+        )
 
 
 class NetVlanMsg(WorkerMsg, NetVlan):

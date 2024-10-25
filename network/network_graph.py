@@ -1,9 +1,10 @@
-from typing import Dict, Tuple, Union
+from typing import Dict, Tuple, Union, Optional
 
 import networkx as nx
-
+import networkx.classes.multigraph
+from pydantic import ConfigDict, PrivateAttr, Field, RootModel
 from models import PhyPort
-from network_base import NetworkBase, logger
+from network.network_base import NetworkBase, logger
 from switch import Switch
 
 
@@ -15,11 +16,20 @@ def compare_graph_edges(e1_src: str, e1_dst: str, e1_data: Dict[str, str], e2_sr
            and e1_data['ports'] == e2_data['ports']
 
 
+class GraphModel(RootModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    root: nx.classes.multigraph.MultiGraph = nx.MultiGraph()
+
+
 class NetworkGraph(NetworkBase):
-    graph: nx.MultiGraph = None  # possible FIXME: LLDP neighbor with SR-IOV enabled??
+
+    graph: GraphModel = GraphModel()
+    #Optional[nx.MultiGraph] = None  # possible FIXME: LLDP neighbor with SR-IOV enabled??
 
     def __init__(self):
         super().__init__()
+        # self.graph = GraphModel()
         self.build_graph()
 
     def _from_topology_link_to_switch_port(self, edge: Tuple) -> Tuple[Switch, PhyPort]:
@@ -28,7 +38,6 @@ class NetworkGraph(NetworkBase):
         return switch, port
 
     def build_graph(self) -> None:
-        self.graph = nx.MultiGraph()
         for s in self.switches:
             self.graph.add_node(s.name, vlans=s.vlans, managed=True)
 
@@ -54,12 +63,14 @@ class NetworkGraph(NetworkBase):
                         edge[2]['vlans'] = list[set(p.trunk_vlans + [p.access_vlan]) | set(edge[2]['vlans'])]
                     else:
                         logger.debug("found edge between switch {} and {}".format(s.name, s.get_neighbors(p.index)))
-                        self.graph.add_edge(s.name, neigh_info.neighbor,
-                                            ports={s.name: p.name, neigh_info.neighbor: neigh_info.remote_interface},
-                                            vlans=p.trunk_vlans + [p.access_vlan],
-                                            missing_vlan_errors={s.name: [], neigh_info.neighbor: []},
-                                            weight=1000000 / p.speed if p.speed else 1000
-                                            )
+                        self.graph.add_edge(
+                            s.name,
+                            neigh_info.neighbor,
+                            ports={s.name: p.name, neigh_info.neighbor: neigh_info.remote_interface},
+                            vlans=p.trunk_vlans + [p.access_vlan],
+                            missing_vlan_errors={s.name: [], neigh_info.neighbor: []},
+                            weight=1000000 / p.speed if p.speed else 1000
+                        )
                         if not p.speed:
                             logger.warning("link {}-{} ports={} has not a valid speed!".format(
                                 s.name,

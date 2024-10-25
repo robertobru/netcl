@@ -1,12 +1,11 @@
 from ipaddress import IPv4Network
 from typing import List, Tuple, Union, Any
 
-from datamodel_code_generator.model.pydantic_v2 import RootModel
-from pydantic import BaseModel
+from pydantic import BaseModel, RootModel
 
 from firewall.firewall_base import Firewall
 from models import PhyPort, VrfRequest
-from network_models import NetworkConfig, NetworkState
+from network.network_models import NetworkConfig, NetworkState
 from network.nbi_msg_models import SetNetworkConfigRequestMsg, PortToNetVlansMsg
 from switch import Switch
 from utils import persistency, create_logger
@@ -15,7 +14,8 @@ _db = persistency.DB()
 logger = create_logger('network')
 
 class ManagedSwitches(RootModel):
-    root: List[Switch]
+    # model_config = ConfigDict(arbitrary_types_allowed=True)
+    root: List[Switch] = []
 
     def get_switch_by_attribute(self, attribute: str, value: Any) -> Switch:
         return next((item for item in self.root if hasattr(item, attribute) and getattr(item, attribute) == value),
@@ -82,7 +82,7 @@ class ManagedSwitches(RootModel):
 
 
 class NetworkBase(BaseModel):
-    switches: ManagedSwitches = []
+    switches: ManagedSwitches = ManagedSwitches()
     vrf_switch: Switch = None
     firewall: Firewall = None
     config: NetworkConfig = None
@@ -90,6 +90,7 @@ class NetworkBase(BaseModel):
     unconfigured: bool = True
 
     def __init__(self):
+        super().__init__()
         db_config = _db.findone_DB('config', {})
         if db_config:
             self.config = NetworkConfig.model_validate(db_config)
